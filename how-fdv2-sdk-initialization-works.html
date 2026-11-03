@@ -316,7 +316,7 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
   </section>
 
   <footer>
-    Teaching model. Flag counts, payload sizes, and retention measured in changes are illustrative; this is not LaunchDarkly’s actual retention implementation or wire format sizes. Tip: add #cold, #short, #long, #restart, #persist, #fallback, or #fleet to the link to open a scenario.
+    Teaching model. Flag counts, payload sizes, and retention measured in changes are illustrative; this is not LaunchDarkly’s actual retention implementation or wire format sizes. Tip: add #cold, #warm, #short, #long, #restart, #persist, #fallback, or #fleet to the link to open a scenario.
   </footer>
 </div>
 
@@ -466,6 +466,29 @@ function buildCold(C) {
   return r.list;
 }
 
+function buildWarm(C) {
+  var V = 130, base = V - C.k, s = newSim(C, V), r = recorder(s), a;
+  if (C.P) s.disk = base;
+  r.add(C.P ? "A new process starts with nothing in memory, but the persistent store already holds flags and selector v" + base + ", written by another instance." :
+    "A new process starts with nothing in memory, and with no persistent store configured there is nothing to boot from.");
+  if (C.P) {
+    s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
+    loaded(s, base, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
+    r.add("Initializer 1 loads flags and selector v" + base + " from the persistent store, so the SDK can evaluate before any network call and skips the polling initializer.");
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, base);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + base, "stream")], down: a.down, dec: a.d });
+  } else {
+    s.active = "poll"; s.chips.poll = "done";
+    a = answer(s, null);
+    r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, s.sel);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+  }
+  return r.list;
+}
+
 function buildGap(C) {
   var s = newSim(C, 120), r = recorder(s), a;
   loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
@@ -555,6 +578,7 @@ function buildFleet(C) {
 
 var SCENARIOS = [
   { id: "cold", name: "Cold start", preset: {}, uses: { P: 1 }, build: buildCold },
+  { id: "warm", name: "Cold start, populated store", preset: { k: 8, H: 30, P: true }, uses: { k: 1, H: 1, P: 1 }, build: buildWarm },
   { id: "short", name: "Short gap", preset: { k: 6, H: 30 }, uses: { k: 1, H: 1 }, build: buildGap },
   { id: "long", name: "Long gap", preset: { k: 45, H: 20 }, uses: { k: 1, H: 1 }, build: buildGap },
   { id: "restart", name: "Restart, no persistence", preset: { k: 8, H: 30, P: false }, uses: { k: 1, H: 1, P: 1 }, build: buildRestart },
