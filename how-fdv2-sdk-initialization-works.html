@@ -236,11 +236,6 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
       <input type="range" id="k" min="0" max="60" step="1">
       <small>Flag changes on the service after the SDK’s selector was issued.</small>
     </div>
-    <div class="ctl" id="cH">
-      <label for="h">Server’s retained history <output id="hOut"></output></label>
-      <input type="range" id="h" min="0" max="50" step="1">
-      <small>How many recent changes the service can still replay as a delta.</small>
-    </div>
     <div class="ctl" id="cP">
       <label for="p">Persistent store</label>
       <div class="row"><input type="checkbox" id="p"><small>Keeps flags and the selector across restarts.</small></div>
@@ -302,7 +297,7 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
     <div class="card">
       <h3>SDK state</h3>
       <dl class="kv" id="iKv"></dl>
-      <p class="muted note">The selector is opaque to the SDK: it stores the token and presents it on the next connect or poll, and never parses or compares it. Only the service knows how many changes it has missed.</p>
+      <p class="muted note">A selector is a version and an opaque state string. The SDK stores the pair and echoes it back on its next connect or poll; it never interprets the state string. Only the service knows how many changes it has missed.</p>
     </div>
     <div class="card">
       <h3>Last response</h3>
@@ -330,14 +325,21 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
 var NF = 48, PUT = 1.5, DEL = 0.1, META = 0.2, NONE = 0.05, LOGN = 64;
 
 /* ============ SELECTOR FORMAT (the only place selectors are rendered) ============
-   The SDK treats a selector as an opaque token: it stores it and presents it on the next connect or
-   poll, and never parses or compares it. The number passed in is this simulation's internal
-   bookkeeping, not a real format. Change SELECTOR if the real format differs. */
+   A selector is a pair: a numeric version and an opaque state string. The SDK stores the pair and
+   echoes it back on its next connect or poll; it never interprets the state string. The number
+   passed in is this simulation's change index. Change SELECTOR if the real format differs. */
 var SELECTOR = {
   NONE: "none",
-  format: function (n) { return "sel_" + ("0000" + (Math.imul(n + 1, 2654435761) >>> 0).toString(16)).slice(-4); }
+  version: function (n) { return String(n); },
+  state: function (n) { return "state-" + n; },
+  pair: function (n) { return "(" + SELECTOR.version(n) + ", \"" + SELECTOR.state(n) + "\")"; }
 };
-function selTok(n) { return n == null ? SELECTOR.NONE : SELECTOR.format(n); }
+function selTok(n) { return n == null ? SELECTOR.NONE : SELECTOR.pair(n); }
+function selVer(n) { return n == null ? SELECTOR.NONE : SELECTOR.version(n); }
+function selState(n) { return n == null ? SELECTOR.NONE : SELECTOR.state(n); }
+
+/* Fixed and illustrative: the service's retained history is not configurable. */
+var RETAIN = 30;
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function pl(n, w) { return n === 1 ? w : w + "s"; }
@@ -396,7 +398,7 @@ function outcome(lead, d) {
 
 function newSim(C, V, fleet) {
   return {
-    V: V, H: C.H, P: C.P, fleet: fleet ? C.N : 0, up: true, store: null, sel: null, via: "", active: null,
+    V: V, H: RETAIN, P: C.P, fleet: fleet ? C.N : 0, up: true, store: null, sel: null, via: "", active: null,
     chips: { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" },
     disk: null, net: "off", fresh: [], updated: [], removed: [], bytes: { step: 0, total: 0 }, last: null, fleetSt: "empty"
   };
@@ -474,8 +476,7 @@ function buildCold(C) {
   r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
   change(s, 1);
   a = answer(s, s.sel);
-  r.add(a.d.kind === "changes" ? "A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector " + selTok(s.V) + "." :
-    "A flag changes, but with no retained history the service can only resend the full payload down the stream.", { down: a.down });
+  r.add("A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector " + selTok(s.V) + ".", { down: a.down });
   return r.list;
 }
 
@@ -563,8 +564,7 @@ function buildFallback(C) {
   r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · " + selTok(120), "poll")], down: a.down, dec: a.d });
   from = s.sel; change(s, 1);
   a = answer(s, from);
-  r.add(a.d.kind === "changes" ? "One more change lands, and the next poll presents selector " + selTok(from) + " and gets only that object." :
-    "One more change lands, and with no retained history the next poll gets the full payload again.", { up: [req(s, "GET · " + selTok(from), "poll")], down: a.down });
+  r.add("One more change lands, and the next poll presents selector " + selTok(from) + " and gets only that object.", { up: [req(s, "GET · " + selTok(from), "poll")], down: a.down });
   return r.list;
 }
 
@@ -584,20 +584,20 @@ function buildFleet(C) {
     a = answer(s, null); s.fleetSt = a.d.kind;
     r.add(outcome("Each container’s polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
   }
-  var other = C.P ? C.N * fullKb(V) : C.N * decide(base, V, C.H).kb;
+  var other = C.P ? C.N * fullKb(V) : C.N * decide(base, V, RETAIN).kb;
   r.add("Across " + C.N + " containers that is " + kb(s.bytes.total) + " received, versus " + kb(other) + (C.P ? " without" : " with") + " a persistent store.");
   return r.list;
 }
 
 var SCENARIOS = [
   { id: "cold", name: "Cold start", preset: {}, uses: { P: 1 }, build: buildCold },
-  { id: "warm", name: "Cold start, populated store", preset: { k: 8, H: 30, P: true }, uses: { k: 1, H: 1, P: 1 }, build: buildWarm },
-  { id: "short", name: "Short gap", preset: { k: 6, H: 30 }, uses: { k: 1, H: 1 }, build: buildGap },
-  { id: "long", name: "Long gap", preset: { k: 45, H: 20 }, uses: { k: 1, H: 1 }, build: buildGap },
-  { id: "restart", name: "Restart, no persistence", preset: { k: 8, H: 30, P: false }, uses: { k: 1, H: 1, P: 1 }, build: buildRestart },
-  { id: "persist", name: "Restart, persistent store", preset: { k: 8, H: 30, P: true }, uses: { k: 1, H: 1, P: 1 }, build: buildRestart },
-  { id: "fallback", name: "Streaming unavailable", preset: { k: 3, H: 30 }, uses: { k: 1, H: 1 }, build: buildFallback },
-  { id: "fleet", name: "Fleet deploy", preset: { k: 10, H: 30, N: 50, P: false }, uses: { k: 1, H: 1, P: 1, N: 1 }, build: buildFleet }
+  { id: "warm", name: "Cold start, populated store", preset: { k: 8, P: true }, uses: { k: 1, P: 1 }, build: buildWarm },
+  { id: "short", name: "Short gap", preset: { k: 6 }, uses: { k: 1 }, build: buildGap },
+  { id: "long", name: "Long gap", preset: { k: 45 }, uses: { k: 1 }, build: buildGap },
+  { id: "restart", name: "Restart, no persistence", preset: { k: 8, P: false }, uses: { k: 1, P: 1 }, build: buildRestart },
+  { id: "persist", name: "Restart, persistent store", preset: { k: 8, P: true }, uses: { k: 1, P: 1 }, build: buildRestart },
+  { id: "fallback", name: "Streaming unavailable", preset: { k: 3 }, uses: { k: 1 }, build: buildFallback },
+  { id: "fleet", name: "Fleet deploy", preset: { k: 10, N: 50, P: false }, uses: { k: 1, P: 1, N: 1 }, build: buildFleet }
 ];
 
 /*==DOM==*/
@@ -653,12 +653,14 @@ CHIPS.forEach(function (c) {
   chipEls[c.k] = { g: g, r: r, nm: nm, st: st, tok: c.tok };
 });
 el("line", { x1: 32, x2: 338, y1: 264, y2: 264, "class": "guide" }, gSdk);
-txt(gSdk, 32, 288, "lbl", "Data store");
-txt(gSdk, 32, 314, "lbl", "Selector · opaque, stored as-is");
-txt(gSdk, 32, 340, "lbl", "Loaded via");
-var vStore = txt(gSdk, 338, 288, "val", "", "end");
-var vSel = txt(gSdk, 338, 314, "val mono", "", "end");
-var vVia = txt(gSdk, 338, 340, "val", "", "end");
+txt(gSdk, 32, 284, "lbl", "Data store");
+txt(gSdk, 32, 306, "lbl", "Selector version");
+txt(gSdk, 32, 328, "lbl", "Selector state · opaque, echoed as-is");
+txt(gSdk, 32, 350, "lbl", "Loaded via");
+var vStore = txt(gSdk, 338, 284, "val", "", "end");
+var vSel = txt(gSdk, 338, 306, "val mono", "", "end");
+var vSelState = txt(gSdk, 338, 328, "val mono", "", "end");
+var vVia = txt(gSdk, 338, 350, "val", "", "end");
 var gDisk = el("g", null, gSdk);
 var diskBody = el("path", { d: "M34 370 v26 a14 5 0 0 0 28 0 v-26", "stroke-width": 1.6 }, gDisk);
 var diskTop = el("ellipse", { cx: 48, cy: 370, rx: 14, ry: 5, "stroke-width": 1.6 }, gDisk);
@@ -696,9 +698,9 @@ el("rect", { x: 750, y: 40, width: 354, height: 384, rx: 14, "class": "panel-box
 txt(svg, 754, 26, "lane-h", "Delivery service");
 txt(svg, SX, 68, "sec", "CURRENT SELECTOR");
 var vVer = txt(svg, SX, 98, "bigv", "");
-txt(svg, 1088, 68, "sec", "RETAINS", "end");
-var vRet = txt(svg, 1088, 96, "val", "", "end");
-txt(svg, SX, 132, "sec", "CHANGE HISTORY · NEWEST LAST");
+txt(svg, 1088, 68, "sec", "STATE · OPAQUE", "end");
+var vRet = txt(svg, 1088, 96, "val mono", "", "end");
+txt(svg, SX, 132, "sec", "CHANGE HISTORY · RETAINS LAST " + RETAIN + " · NEWEST LAST");
 var cells = [];
 for (var ci = 0; ci < LOGN; ci++) {
   var cx = SX + (ci % 16) * 20, cy = 142 + Math.floor(ci / 16) * 20;
@@ -733,6 +735,10 @@ var CHIPST = {
   na: "not configured", idle: "waiting", active: "running", empty: "ran · found nothing", done: "yielded a payload",
   skipped: "skipped", failed: "can’t connect", retry: "reconnecting", standby: "unavailable · retries later"
 };
+function fitText(t, max) {
+  t.removeAttribute("textLength");
+  if (t.getComputedTextLength && t.getComputedTextLength() > max) { t.setAttribute("textLength", max); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+}
 function drawLanes(s, animate) {
   gStack.style.display = s.fleet ? "" : "none";
   sdkSub.textContent = s.fleet ? "× " + s.fleet + " containers, each running the same SDK" : "your app process";
@@ -749,13 +755,15 @@ function drawLanes(s, animate) {
   var n = s.store ? Object.keys(s.store).length : 0;
   vStore.textContent = s.store ? n + " flags" + (s.fleet ? " each" : "") : "empty";
   vStore.style.fill = s.store ? "" : "var(--ink2)";
-  vSel.textContent = selTok(s.sel);
-  vSel.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
+  vSel.textContent = selVer(s.sel);
+  vSelState.textContent = selState(s.sel);
+  vSel.style.fill = vSelState.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
   vVia.textContent = s.via || "—";
   gDisk.style.opacity = s.P ? "1" : "0.4";
   diskBody.style.fill = diskTop.style.fill = s.P && s.disk != null ? mix("init", 30) : "var(--surface)";
   diskBody.style.stroke = diskTop.style.stroke = s.P ? col("init") : "var(--line)";
   vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector " + selTok(s.disk);
+  fitText(vDisk, 266);
   gDown.style.display = s.up ? "none" : "";
 
   var band = { stream: ["stream", "SSE STREAM OPEN", ""], broken: ["fail", "STREAM DOWN", "8 7"], poll: ["poll", "POLLING ON AN INTERVAL", "2 8"] }[s.net];
@@ -769,8 +777,8 @@ function drawLanes(s, animate) {
   vBytes.textContent = kb(s.bytes.total);
   vBytesStep.textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "";
 
-  vVer.textContent = selTok(s.V);
-  vRet.textContent = "last " + s.H + " " + pl(s.H, "change");
+  vVer.textContent = selVer(s.V);
+  vRet.textContent = selState(s.V);
   cells.forEach(function (c, i) {
     var v = s.V - (LOGN - 1) + i;
     if (v < 1) { c.g.style.display = "none"; return; }
@@ -795,13 +803,10 @@ function drawLanes(s, animate) {
   else if (s.sel == null) cap = "SDK has no selector";
   else {
     var gap = s.V - s.sel;
-    cap = "SDK selector " + selTok(s.sel) + " · " + (gap === 0 ? "current" : gap + " " + pl(gap, "change") + " missed" + (gap > s.H ? ", expired" : ""));
+    cap = "SDK selector version " + selVer(s.sel) + " · " + (gap === 0 ? "current" : gap + " " + pl(gap, "change") + " missed" + (gap > s.H ? ", expired" : ""));
   }
   vSelCap.textContent = cap;
-  vSelCap.removeAttribute("textLength");
-  if (vSelCap.getComputedTextLength && vSelCap.getComputedTextLength() > 322) {
-    vSelCap.setAttribute("textLength", 322); vSelCap.setAttribute("lengthAdjust", "spacingAndGlyphs");
-  }
+  fitText(vSelCap, 322);
   vSelCap.style.fill = s.sel != null && s.V - s.sel > s.H ? col("fail") : "";
   if (s.last) { vAns.textContent = { full: "xfer-full", changes: "xfer-changes", none: "none" }[s.last.d.kind]; vAns.style.fill = col(KTOK[s.last.d.kind]); }
   else { vAns.textContent = "—"; vAns.style.fill = "var(--ink2)"; }
@@ -812,11 +817,11 @@ var REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: r
 var SPEED = 1;
 function ease(x) { return x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x); }
 function makePacket(p, dir, row, t, dur) {
-  var w = p.t.length * 7.3 + 22, y = dir === "up" ? 112 + row * 30 : 238 + row * 30;
+  var w = Math.min(p.t.length * 7.3 + 22, NX1 - NX0 - 4), y = dir === "up" ? 112 + row * 30 : 238 + row * 30;
   var g = el("g", { "class": "pkt" }, gPk);
   var r = el("rect", { x: -w / 2, y: -12, width: w, height: 24, rx: 12 }, g);
   r.style.fill = mix(p.tok, 20); r.style.stroke = col(p.tok);
-  txt(g, 0, 4.5, "", p.t, "middle");
+  fitText(txt(g, 0, 4.5, "", p.t, "middle"), w - 20);
   var x0 = dir === "up" ? NX0 + w / 2 : NX1 - w / 2, x1 = dir === "up" ? NX1 - w / 2 : NX0 + w / 2;
   g.style.opacity = "0";
   return { g: g, y: y, x0: x0, x1: x1, t: t, dur: dur, fail: p.fail, r: r };
@@ -867,7 +872,8 @@ function drawInspector(s) {
   }
   var ACT = { cache: "Initializer 1 · Persistent cache", poll: "Initializer 2 · Polling", stream: "Synchronizer 1 · Streaming", spoll: "Synchronizer 2 · Polling" };
   var kv = [
-    ["Selector", selTok(s.sel), true],
+    ["Selector version", selVer(s.sel), true],
+    ["Selector state", selState(s.sel), true],
     ["Changes missed", !s.up || s.sel == null ? "—" : String(s.V - s.sel)],
     ["Active", !s.up ? "process stopped" : s.active ? ACT[s.active] : "nothing yet"],
     ["Loaded via", s.via || "—"],
@@ -897,7 +903,7 @@ function drawInspector(s) {
     var V = s.V, base = V - C.k;
     bars = [
       ["Without persistent store", C.N * fullKb(V), "full", !C.P],
-      ["With persistent store", C.N * decide(base, V, C.H).kb, KTOK[decide(base, V, C.H).kind], C.P]
+      ["With persistent store", C.N * decide(base, V, RETAIN).kb, KTOK[decide(base, V, RETAIN).kind], C.P]
     ];
   } else {
     bars = [["Full payload now", fullKb(s.V), "full", s.last && s.last.d.kind === "full"]];
@@ -916,7 +922,7 @@ function drawInspector(s) {
 }
 
 /* ============ runner ============ */
-var C = { k: 6, H: 30, P: false, N: 50 };
+var C = { k: 6, P: false, N: 50 };
 var cur = { sc: 0, i: 0, steps: [], dec: -1, playing: false, pred: null, arrived: true, timer: 0, raf: 0 };
 
 function rebuild() {
@@ -1009,10 +1015,10 @@ function panel() {
 
 /* ============ controls ============ */
 function syncControls() {
-  $("k").value = C.k; $("h").value = C.H; $("p").checked = C.P; $("n").value = C.N;
-  $("kOut").textContent = C.k; $("hOut").textContent = C.H;
+  $("k").value = C.k; $("p").checked = C.P; $("n").value = C.N;
+  $("kOut").textContent = C.k;
   var u = SCENARIOS[cur.sc].uses;
-  [["cK", "k", "k"], ["cH", "H", "h"], ["cP", "P", "p"], ["cN", "N", "n"]].forEach(function (c) {
+  [["cK", "k", "k"], ["cP", "P", "p"], ["cN", "N", "n"]].forEach(function (c) {
     var on = !!u[c[1]];
     $(c[0]).classList.toggle("off", !on);
     $(c[2]).disabled = !on;
@@ -1029,7 +1035,7 @@ function selectScenario(idx) {
   try { history.replaceState(null, "", "#" + SCENARIOS[idx].id); } catch (e) {}
 }
 function onControl() {
-  C.k = +$("k").value; C.H = +$("h").value; C.P = $("p").checked;
+  C.k = +$("k").value; C.P = $("p").checked;
   C.N = Math.max(2, Math.min(500, Math.round(+$("n").value) || 50));
   syncControls();
   if (cur.i < cur.dec) cur.pred = null;
@@ -1047,7 +1053,7 @@ $("tabs").addEventListener("keydown", function (e) {
   var k = (cur.sc + (e.key === "ArrowRight" ? 1 : SCENARIOS.length - 1)) % SCENARIOS.length;
   selectScenario(k); $("tabs").children[k].focus();
 });
-["k", "h"].forEach(function (id) { $(id).addEventListener("input", onControl); });
+$("k").addEventListener("input", onControl);
 $("p").addEventListener("change", onControl);
 $("n").addEventListener("change", onControl);
 $("prev").addEventListener("click", function () { if (cur.i > 0) jump(cur.i - 1); });
