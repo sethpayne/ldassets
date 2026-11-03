@@ -759,7 +759,7 @@ function drawLanes(s, animate) {
   vSelState.textContent = selState(s.sel);
   vSel.style.fill = vSelState.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
   vVia.textContent = s.via || "—";
-  gDisk.style.opacity = s.P ? "1" : "0.4";
+  gDisk.style.display = s.P ? "" : "none";
   diskBody.style.fill = diskTop.style.fill = s.P && s.disk != null ? mix("init", 30) : "var(--surface)";
   diskBody.style.stroke = diskTop.style.stroke = s.P ? col("init") : "var(--line)";
   vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector " + selTok(s.disk);
@@ -876,9 +876,9 @@ function drawInspector(s) {
     ["Selector state", selState(s.sel), true],
     ["Changes missed", !s.up || s.sel == null ? "—" : String(s.V - s.sel)],
     ["Active", !s.up ? "process stopped" : s.active ? ACT[s.active] : "nothing yet"],
-    ["Loaded via", s.via || "—"],
-    ["Persistent store", !s.P ? "off" : s.disk == null ? "empty" : selTok(s.disk), s.P && s.disk != null]
+    ["Loaded via", s.via || "—"]
   ];
+  if (s.P) kv.push(["Persistent store", s.disk == null ? "empty" : selTok(s.disk), s.disk != null]);
   $("iKv").innerHTML = "";
   kv.forEach(function (r) {
     var dt = document.createElement("dt"), dd = document.createElement("dd");
