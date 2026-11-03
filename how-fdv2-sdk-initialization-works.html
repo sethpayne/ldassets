@@ -758,9 +758,13 @@ function drawLanes(s, animate) {
   else if (s.sel == null) cap = "SDK has no selector";
   else {
     var gap = s.V - s.sel;
-    cap = "SDK selector v" + s.sel + " · " + (gap === 0 ? "current" : gap + " behind" + (gap > s.H ? ", beyond retained history" : ""));
+    cap = "SDK selector v" + s.sel + " · " + (gap === 0 ? "current" : gap + " behind" + (gap > s.H ? ", expired" : ""));
   }
   vSelCap.textContent = cap;
+  vSelCap.removeAttribute("textLength");
+  if (vSelCap.getComputedTextLength && vSelCap.getComputedTextLength() > 322) {
+    vSelCap.setAttribute("textLength", 322); vSelCap.setAttribute("lengthAdjust", "spacingAndGlyphs");
+  }
   vSelCap.style.fill = s.sel != null && s.V - s.sel > s.H ? col("fail") : "";
   if (s.last) { vAns.textContent = { full: "xfer-full", changes: "xfer-changes", none: "none" }[s.last.d.kind]; vAns.style.fill = col(KTOK[s.last.d.kind]); }
   else { vAns.textContent = "—"; vAns.style.fill = "var(--ink2)"; }
