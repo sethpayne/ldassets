@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How a flag change travels through FDv2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  --sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --bg: #eef2f7;
+  --surface: #ffffff;
+  --surface2: #e5ebf3;
+  --ink: #0f1a2c;
+  --ink2: #45546c;
+  --line: #c4cfde;
+  --stream: #0c9686;
+  --poll: #b7791f;
+  --fail: #d03f3f;
+  --ok: #1b9150;
+  --events: #7556d1;
+  --rollback: #d4630b;
+  --blue: #2c6bd0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1220;
+    --surface: #131c30;
+    --surface2: #1b2742;
+    --ink: #e8eef9;
+    --ink2: #9aa9c6;
+    --line: #2d3c5e;
+    --stream: #2dd4bf;
+    --poll: #fbbf24;
+    --fail: #f87171;
+    --ok: #4ade80;
+    --events: #a78bfa;
+    --rollback: #fb923c;
+    --blue: #60a5fa;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --surface: #131c30;
+  --surface2: #1b2742;
+  --ink: #e8eef9;
+  --ink2: #9aa9c6;
+  --line: #2d3c5e;
+  --stream: #2dd4bf;
+  --poll: #fbbf24;
+  --fail: #f87171;
+  --ok: #4ade80;
+  --events: #a78bfa;
+  --rollback: #fb923c;
+  --blue: #60a5fa;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.app { max-width: 1240px; margin: 0 auto; padding: 22px 20px 40px; }
+h1 { font-size: clamp(22px, 3.2vw, 30px); font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+.sub { margin: 0 0 18px; color: var(--ink2); font-size: 15px; }
+
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.chapter {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink2);
+  font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+}
+.chapter[aria-current="true"] { color: var(--ink); border-color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 1px var(--ink); }
+.chapter:hover { color: var(--ink); }
+.dots { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.dot {
+  appearance: none; width: 26px; height: 8px; border-radius: 4px; border: 0; padding: 0; cursor: pointer;
+  background: var(--line);
+}
+.dot.past { background: var(--ink2); }
+.dot[aria-current="true"] { background: var(--blue); }
+.dot:hover { filter: brightness(1.15); }
+
+.caption {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px 24px 18px; margin-bottom: 14px;
+}
+.cap-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.cap-meta { color: var(--ink2); font-size: 14px; font-weight: 500; }
+.cap-title { font-family: var(--serif); font-size: clamp(24px, 3vw, 32px); line-height: 1.15; font-weight: 600; margin: 6px 0 8px; letter-spacing: -0.005em; }
+.cap-body { font-family: var(--serif); font-size: clamp(18px, 1.9vw, 21px); line-height: 1.5; margin: 0; max-width: 78ch; }
+details.hood { margin-top: 12px; }
+details.hood summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink2); width: fit-content; }
+details.hood ul { margin: 8px 0 0; padding-left: 20px; color: var(--ink2); font-size: 15px; max-width: 80ch; }
+details.hood li { margin: 4px 0; }
+.cap-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+button.btn {
+  appearance: none; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface2); color: var(--ink);
+  padding: 9px 18px; border-radius: 10px;
+}
+button.btn:hover:not(:disabled) { border-color: var(--ink2); }
+button.btn:disabled { opacity: 0.4; cursor: default; }
+button.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.spacer { flex: 1 1 auto; }
+.setting { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink2); }
+.setting select {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+}
+.setting input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.scroller { overflow-x: auto; }
+.view { min-width: 760px; position: relative; container-type: inline-size; }
+.view[hidden] { display: none; }
+svg { display: block; width: 100%; height: auto; font-family: var(--sans); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 4px 0; font-size: 13px; color: var(--ink2); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.nodeinfo { margin: 10px 4px 0; font-size: 15px; color: var(--ink2); min-height: 44px; max-width: 90ch; }
+.nodeinfo b { color: var(--ink); }
+
+/* diagram */
+.container-box { fill: color-mix(in srgb, var(--surface2) 55%, var(--surface)); stroke: var(--line); stroke-width: 1.5; }
+.container-label { fill: var(--ink2); font-size: 11.5px; font-weight: 700; }
+.node { cursor: pointer; }
+.node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.6; }
+.node:hover rect.box { stroke: var(--ink2); }
+.node.selected rect.box { stroke-dasharray: 5 3; }
+.node text { fill: var(--ink); }
+.node .t { font-size: 13.5px; font-weight: 700; }
+.node .s { font-size: 11px; fill: var(--ink2); font-weight: 500; }
+.node .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; }
+.relay rect.box { fill: transparent; stroke-dasharray: 6 5; }
+.lane { fill: none; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.lane-label { font-size: 11px; font-weight: 700; }
+.chip rect { stroke-width: 1.6; }
+.pill rect { fill: var(--surface2); stroke-width: 1.8; }
+.pill text { fill: var(--ink); font-size: 12px; font-weight: 700; }
+.packet circle { stroke: var(--surface); stroke-width: 1.5; }
+.callout {
+  position: absolute; left: 29%; top: 59%; width: 52%;
+  padding: 0.7em 1em; border-radius: 10px; border: 2px solid var(--line);
+  font-size: clamp(13px, 1.55cqw, 19px); font-weight: 700; line-height: 1.3; color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface2));
+  pointer-events: none;
+}
+.callout[hidden] { display: none; }
+
+/* timelines */
+.rows { position: relative; display: grid; gap: 22px; padding: 30px 6px 8px; }
+.row { display: grid; grid-template-columns: 210px 1fr; gap: 16px; align-items: center; }
+.row .rl b { display: block; font-size: 16px; }
+.row .rl span { font-size: 13px; color: var(--ink2); }
+.track { position: relative; height: 54px; background: color-mix(in srgb, var(--surface2) 60%, var(--surface)); border-radius: 10px; overflow: hidden; }
+.seg {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; font-size: 14px; font-weight: 700; padding: 0 8px; color: #06131f;
+  transform: scaleX(0); transform-origin: left center; transition: transform 0.9s ease;
+}
+.seg span { opacity: 0; transition: opacity 0.4s ease 0.7s; }
+.seg.on { transform: scaleX(1); }
+.seg.on span { opacity: 1; }
+.seg.instant, .seg.instant span { transition: none; }
+.row.muted { opacity: 0.35; }
+.marks { position: absolute; left: 232px; right: 6px; top: 6px; bottom: 6px; pointer-events: none; }
+.mark { position: absolute; top: 0; bottom: 0; border-left: 2px dashed; }
+.mark em { position: absolute; top: -4px; transform: translateX(-50%) translateY(-100%); font-style: normal; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.note {
+  margin: 14px 6px 4px; padding: 12px 16px; border: 1.5px solid var(--poll); border-radius: 10px;
+  font-size: 14.5px; color: var(--ink2); background: color-mix(in srgb, var(--poll) 8%, var(--surface));
+}
+.note b { color: var(--ink); }
+.note[hidden] { display: none; }
+
+.sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 28px; padding: 6px 6px 18px; }
+.slider label { display: flex; justify-content: space-between; font-weight: 600; font-size: 15px; }
+.slider input[type="range"] { width: 100%; accent-color: var(--blue); }
+.slider small { color: var(--ink2); font-size: 13px; }
+.lat-rows { display: grid; gap: 18px; padding: 4px 6px; }
+.lat-row { display: grid; grid-template-columns: 210px 1fr 120px; gap: 16px; align-items: center; }
+.lat-row b { display: block; font-size: 15.5px; }
+.lat-row span { font-size: 13px; color: var(--ink2); }
+.lat-track { position: relative; height: 40px; background: color-mix(in srgb, var(--surface2) 60%, var(--surface)); border-radius: 10px; overflow: hidden; }
+.lat-bar { position: absolute; top: 0; bottom: 0; transition: width 0.5s ease, left 0.5s ease; min-width: 4px; border-radius: 4px; }
+.lat-val { font-weight: 700; font-size: 15px; text-align: right; }
+.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 18px 6px 4px; }
+.total { border: 1.5px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.total b { display: block; font-size: 22px; margin-top: 2px; }
+.total span { color: var(--ink2); font-size: 14px; }
+
+.recap { display: grid; gap: 14px; padding: 6px; }
+.take { border: 1.5px solid; border-radius: 10px; padding: 12px 16px; }
+.take b { display: block; font-size: 17px; }
+.take span { color: var(--ink2); font-size: 15px; }
+.verify { border: 1.5px solid var(--line); border-radius: 10px; padding: 14px 18px; }
+.verify h3 { margin: 0 0 6px; font-size: 16px; }
+.verify ul { margin: 0; padding-left: 20px; color: var(--ink2); font-size: 15px; }
+.verify li { margin: 4px 0; }
+footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch; }
+@media (prefers-reduced-motion: reduce) {
+  .seg, .seg span, .lat-bar { transition: none !important; }
+}
+@media (max-width: 640px) {
+  .app { padding: 16px 12px 30px; }
+  .caption { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>How a flag change travels through FDv2</h1>
+  <p class="sub">A step-by-step walkthrough for Flag Delivery engineers: startup, streaming, failure and fallback, and guarded-release rollbacks.</p>
+
+  <nav class="chapters" id="chapters" aria-label="Chapters"></nav>
+  <div class="dots" id="dots" role="group" aria-label="Steps"></div>
+
+  <section class="caption" aria-live="polite">
+    <div class="cap-top">
+      <span class="cap-meta" id="capMeta"></span>
+    </div>
+    <h2 class="cap-title" id="capTitle"></h2>
+    <p class="cap-body" id="capBody"></p>
+    <details class="hood" id="hood">
+      <summary>Under the hood</summary>
+      <ul id="hoodList"></ul>
+    </details>
+    <div class="cap-actions">
+      <button class="btn" id="btnBack" type="button">Back</button>
+      <button class="btn primary" id="btnNext" type="button">Next step</button>
+      <button class="btn" id="btnReplay" type="button">Replay step</button>
+      <span class="spacer"></span>
+      <label class="setting"><input type="checkbox" id="auto"> Auto-advance</label>
+      <label class="setting">Speed
+        <select id="speed">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+      <label class="setting">Fallback threshold
+        <select id="fb">
+          <option value="120" selected>2 min (C++ SDK, AaW)</option>
+          <option value="60">60 s (Go test matrix)</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="stage">
+    <div class="scroller">
+      <!-- architecture -->
+      <div class="view" id="vArch">
+        <svg id="arch" viewBox="0 0 1200 560" role="img" aria-label="Flag delivery architecture diagram"></svg>
+        <div class="callout" id="callout" hidden></div>
+      </div>
+
+      <!-- Oct 20, 2025 -->
+      <div class="view" id="vOct" hidden>
+        <div class="rows" id="octRows">
+          <div class="marks" id="octMarks"></div>
+        </div>
+        <div class="note" id="octNote" hidden></div>
+      </div>
+
+      <!-- latency -->
+      <div class="view" id="vLat" hidden>
+        <div class="sliders">
+          <div class="slider">
+            <label for="sDet">Time to detect a regression <span id="vDet"></span></label>
+            <input type="range" id="sDet" min="20" max="180" step="5" value="60">
+            <small>Docs say about a minute; real time depends on traffic and stage size.</small>
+          </div>
+          <div class="slider">
+            <label for="sPoll">Poll interval on fallback <span id="vPoll"></span></label>
+            <input type="range" id="sPoll" min="10" max="60" step="5" value="30">
+            <small>30 s in the Go FDv2 test matrix.</small>
+          </div>
+        </div>
+        <div class="lat-rows" id="latRows"></div>
+        <div class="totals" id="latTotals"></div>
+      </div>
+
+      <!-- recap -->
+      <div class="view" id="vRecap" hidden>
+        <div class="recap" id="recapBody"></div>
+      </div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <p class="nodeinfo" id="nodeInfo">Click any component in the diagram to see what it does.</p>
+  </section>
+
+  <footer>
+    Draft for internal engineering. Sources: Oct 20, 2025 public RCA; FDv2 GA proposal and server SDK migration guide; cpp-sdks PR #531; FDv1 to FDv2 Go test matrix; AaW claims page; guarded rollout docs. Timers on screen are compressed. Verify the items on the last step before sharing outside Flag Delivery. Tip: add #s5 to the link to open a specific step.
+  </footer>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+/* ============ state model (pure) ============ */
+var FB = { "120": { sec: 120, label: "2 minutes", short: "≈ 2 min" }, "60": { sec: 60, label: "60 seconds", short: "≈ 60 s" } };
+var SET = { fb: "120", speed: 1, auto: false };
+function fb() { return FB[SET.fb]; }
+function mmss(s) { s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60), r = s % 60; return (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r; }
+
+var LANES = ["poll", "poll2", "stream", "events", "ing", "bus1", "bus2", "ctrl", "rollback"];
+function defaults() {
+  var lanes = {};
+  LANES.forEach(function (n) { lanes[n] = { t: "line", a: 0.6, dash: false }; });
+  return {
+    lanes: lanes, hl: {}, pills: {}, dim: ["ingest", "guard"],
+    chips: ["off", "off", "off"],
+    status: { t: "INITIALIZING", c: "poll", sub: "" },
+    store: { text: "empty", ok: false },
+    note: "", broken: false, callout: null,
+    chart: { p: 0, bad: false }
+  };
+}
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function apply(s, p) {
+  if (typeof p === "function") p = p();
+  if (!p) return;
+  Object.keys(p).forEach(function (k) {
+    var v = p[k];
+    if (k === "lanes") {
+      Object.keys(v).forEach(function (n) { s.lanes[n] = Object.assign({}, s.lanes[n], v[n]); });
+    } else if (k === "hl" || k === "pills") {
+      Object.keys(v).forEach(function (n) { if (v[n] === null) delete s[k][n]; else s[k][n] = v[n]; });
+    } else if (k === "chart") {
+      s.chart = Object.assign({}, s.chart, v);
+    } else {
+      s[k] = v;
+    }
+  });
+}
+
+function applyInit(s, p) {
+  if (typeof p === "function") p = p();
+  if (!p) return;
+  var rest = {};
+  Object.keys(p).forEach(function (k) {
+    if (k === "hl" || k === "pills") s[k] = clone(p[k]); else rest[k] = p[k];
+  });
+  apply(s, rest);
+}
+
+var DIMLANE = { lanes: { poll: { t: "line", a: 0.6 }, poll2: { t: "line", a: 0.6 } } };
+function pk(at, dur, path, rev, tok, label, lpos, bounce) { return { at: at, dur: dur, path: path, rev: !!rev, tok: tok, label: label, lpos: lpos, bounce: !!bounce }; }
+
+var STEPS = [
+  /* 0 */ {
+    chapter: 0, view: "arch", title: "Startup: one poll loads the payload",
+    body: function () { return "The SDK’s initializer makes a single polling request, a full-basis GET served from the CDN edge. The response carries the flag payload plus a cursor (the selector) that marks exactly where this copy of the data stands."; },
+    hood: [
+      "Initializers run in order to load a basis; synchronizers then keep that data current.",
+      "The SDK can report itself initialized before its first payload is applied, so don’t treat “initialized” as “live data has arrived” (server SDK migration guide).",
+      "FDv2 is opt-in per SDK, and LaunchDarkly must enable it for the account."
+    ],
+    init: function () { return { dim: ["ingest", "guard"], status: { t: "INITIALIZING", c: "poll", sub: "" }, store: { text: "empty", ok: false }, chips: ["off", "off", "off"], callout: null, pills: {}, hl: {}, broken: false, note: "", chart: { p: 0, bad: false } }; },
+    tl: [
+      { at: 300, patch: { chips: ["poll", "off", "off"], lanes: { poll: { t: "poll", a: 1 } } } },
+      { at: 2300, patch: { hl: { poll: "poll" } } },
+      { at: 3000, patch: { hl: { poll: null } } },
+      { at: 4300, patch: { status: { t: "VALID", c: "ok", sub: "from initial poll" }, store: { text: "flags @ cursor c41", ok: true }, hl: { store: "ok" } } },
+      { at: 5400, patch: { hl: { store: null } } }
+    ],
+    packets: [ pk(500, 1800, "poll", false, "poll", "GET · full basis", "poll"), pk(2500, 1800, "poll", true, "poll", "payload + cursor c41", "poll") ],
+    dur: 6200
+  },
+  /* 1 */ {
+    chapter: 0, view: "arch", title: "Go live: the stream opens",
+    body: function () { return "Synchronizer 1 opens a long-lived SSE stream and resumes from the cursor it just received. Startup and ongoing updates are one protocol, not two code paths."; },
+    hood: [
+      "FDv1 made you choose streaming or polling up front; FDv2 defaults to streaming and falls back on its own.",
+      "On any reconnect the SDK sends its cursor and receives a delta instead of the whole payload (about 90% less data on reconnect, per the FDv2 GA proposal)."
+    ],
+    init: function () { return Object.assign({ chips: ["off", "off", "off"] }, DIMLANE); },
+    tl: [
+      { at: 200, patch: { chips: ["off", "stream", "off"], hl: { stream: "stream" }, lanes: { stream: { t: "stream", a: 1 } } } },
+      { at: 2300, patch: { status: { t: "VALID", c: "ok", sub: "streaming" }, hl: { stream: null } } }
+    ],
+    packets: [ pk(300, 1800, "stream", false, "stream", "open stream · resume c41", "stream") ],
+    dur: 3200
+  },
+  /* 2 */ {
+    chapter: 0, view: "arch", title: "A flag change is pushed",
+    body: function () { return "A change hits the control plane, lands in the versioned flag state, and is pushed down the stream that is already open. There’s no polling interval to wait out and nothing to re-download."; },
+    hood: [
+      "Published propagation time is about 200 ms at P99 (AaW claims page).",
+      "The SDK applies the delta to its in-memory store. Evaluations read from that store and never wait on the network."
+    ],
+    init: function () { return {}; },
+    tl: [
+      { at: 300, patch: { hl: { control: "blue" }, pills: { chg: { text: "flag change", c: "blue", x: 1050, y: 40 } } } },
+      { at: 1200, patch: { hl: { control: null, fstore: "blue" } } },
+      { at: 2100, patch: { hl: { fstore: null, stream: "stream" } } },
+      { at: 3800, patch: { hl: { stream: null }, store: { text: "flags @ cursor c42", ok: true }, pills: { chg: null, ms: { text: "≈ 200 ms (published P99)", c: "stream", x: 465, y: 128 } }, callout: { text: "No poll interval. No re-download.", c: "stream" } } }
+    ],
+    packets: [ pk(500, 700, "ctrl", false, "blue"), pk(1300, 800, "toStreamers", false, "blue"), pk(2200, 1500, "stream", true, "stream", "delta c42", "stream") ],
+    dur: 4400
+  },
+  /* 3 */ {
+    chapter: 1, view: "arch", title: "The stream drops",
+    body: function () { return "The stream breaks. The SDK reports INTERRUPTED, keeps serving the last values it has, and retries with backoff and jitter. If the interruption lasts " + fb().label + ", the fallback rule fires."; },
+    hood: [
+      "Evaluations are never blocked by a delivery failure.",
+      "The clock on screen is compressed.",
+      "Thresholds differ by source: 2 min to fall back and 5 min to recover (cpp-sdks PR #531, AaW claims page) versus 60 s in the Go FDv2 test matrix. Use the Fallback threshold setting to compare."
+    ],
+    init: function () { return { pills: {}, callout: null, hl: {} }; },
+    tl: [
+      { at: 300, patch: { lanes: { stream: { t: "fail", a: 0.95, dash: true } }, broken: true, chips: ["off", "fail", "off"], status: { t: "INTERRUPTED", c: "fail", sub: "NETWORK_ERROR · retrying" }, note: "evaluations keep serving last-known values" } },
+      { at: 900, patch: { pills: { bo: { text: "retry · backoff + jitter", c: "fail", x: 465, y: 128 } } } },
+      { at: 5000, patch: { pills: { bo: null } } }
+    ],
+    ticks: [ { at: 800, dur: 4200, fn: function (p) { return { callout: { text: "Interrupted " + mmss(p * fb().sec) + "  →  fallback at " + mmss(fb().sec) + " (time compressed)", c: "fail" } }; } } ],
+    packets: [ pk(900, 900, "stream", false, "fail", null, null, true), pk(2400, 900, "stream", false, "fail", null, null, true), pk(3800, 900, "stream", false, "fail", null, null, true) ],
+    dur: 5400
+  },
+  /* 4 */ {
+    chapter: 1, view: "arch", title: "Automatic fallback to polling",
+    body: function () { return "After " + fb().label + " of interruption, the orchestrator moves to Synchronizer 2 (polling) and resumes from the same cursor. It asks for a delta since c42, not the full payload, and status returns to VALID."; },
+    hood: [
+      "The polling endpoint is served from the CDN path, the same path every FDv2 SDK uses at startup.",
+      "Fallback covers transport failures such as timeouts and connection errors.",
+      "Fallback is automatic: no configuration and no customer action."
+    ],
+    init: function () { return { callout: null, pills: {} }; },
+    tl: [
+      { at: 300, patch: function () { return { callout: { text: "Fallback rule fired: interrupted ≥ " + fb().label, c: "poll" }, chips: ["off", "dead", "poll"], lanes: { poll: { t: "poll", a: 1 }, poll2: { t: "poll", a: 1 } }, hl: { poll: "poll" } }; } },
+      { at: 900, patch: { status: { t: "VALID", c: "ok", sub: "polling fallback" }, note: "" } },
+      { at: 4200, patch: { hl: { poll: null } } }
+    ],
+    packets: [ pk(900, 1500, "poll", false, "poll", "GET · since c42", "poll"), pk(2500, 1500, "poll", true, "poll", "delta: none", "poll") ],
+    dur: 4600
+  },
+  /* 5 */ {
+    chapter: 1, view: "arch", title: "Updates keep flowing",
+    body: function () { return "A flag change made during the outage can’t be pushed, so it reaches the SDK at the next poll. Slower than a push, but not lost."; },
+    hood: [
+      "Worst-case delay is one poll interval (30 s in the Go test matrix).",
+      "Polling resumes from the cursor, so each poll returns only what changed."
+    ],
+    init: function () { return { callout: null }; },
+    tl: [
+      { at: 200, patch: { hl: { control: "blue" }, pills: { chg: { text: "flag change (during outage)", c: "blue", x: 1050, y: 40 } } } },
+      { at: 1300, patch: { hl: { control: null, fstore: "blue" } } },
+      { at: 6800, patch: { store: { text: "flags @ cursor c43", ok: true }, hl: { store: "ok", fstore: null }, pills: { chg: null }, callout: { text: "Slower than a push, but not lost.", c: "ok" } } }
+    ],
+    ticks: [ { at: 1500, dur: 2700, fn: function (p) { return { callout: { text: "Next poll in " + Math.round(30 * (1 - p)) + " s (at most one poll interval)", c: "poll" } }; } } ],
+    packets: [ pk(500, 700, "ctrl", false, "blue"), pk(4300, 1300, "poll", false, "poll", "GET · since c42", "poll"), pk(5500, 1300, "poll", true, "poll", "delta c43", "poll") ],
+    dur: 7600
+  },
+  /* 6 */ {
+    chapter: 1, view: "arch", title: "Automatic recovery to streaming",
+    body: function () { return "Once polling has run healthily for 5 minutes, the SDK tries the stream again and resumes from its latest cursor. No restart and no operator action."; },
+    hood: [
+      "Fallback and recovery are automatic in both directions.",
+      "The 5-minute recovery threshold comes from cpp-sdks PR #531 and may differ by SDK.",
+      "Clock on screen is compressed."
+    ],
+    init: function () { return { callout: null, hl: {}, pills: {} }; },
+    tl: [
+      { at: 300, patch: { lanes: { stream: { t: "stream", a: 0.9, dash: true } }, broken: false } },
+      { at: 4200, patch: { chips: ["off", "stream", "off"], lanes: { stream: { t: "stream", a: 1, dash: false }, poll: { t: "line", a: 0.6 }, poll2: { t: "line", a: 0.6 } }, status: { t: "VALID", c: "ok", sub: "streaming (recovered)" }, hl: { stream: "stream" }, callout: { text: "Back on streaming. No restart. No operator.", c: "ok" } } },
+      { at: 6200, patch: { hl: { stream: null } } }
+    ],
+    ticks: [ { at: 500, dur: 3500, fn: function (p) { return { callout: { text: "Healthy on fallback " + mmss(p * 300) + "  →  retry stream at 05:00 (time compressed)", c: "stream" } }; } } ],
+    packets: [ pk(4200, 1700, "stream", false, "stream", "resume from c43", "stream") ],
+    dur: 6600
+  },
+  /* 7 */ {
+    chapter: 2, view: "oct", stage: 1, title: "Oct 20, 2025: streaming-only SDKs go stale",
+    body: function () { return "During the AWS us-east-1 outage, streaming-only SDKs in the US stopped receiving flag updates, while polling SDKs stayed up at typical error rates. Failover from streaming to polling was still listed as upcoming work."; },
+    hood: ["Source: LaunchDarkly’s public RCA for Oct 20, 2025.", "Bars are illustrative, not to scale."],
+    init: function () { return {}; }, tl: [], packets: [], dur: 3200
+  },
+  /* 8 */ {
+    chapter: 2, view: "oct", stage: 2, title: "The same outage with FDv2",
+    body: function () { return "An FDv2 SDK would mark the stream INTERRUPTED, fall back to polling after " + fb().label + ", and keep receiving changes, then return to streaming when streams recover."; },
+    hood: [
+      "This holds because the polling path stayed up (public RCA: polling SDKs operational).",
+      "Phase 2, the 11:48 AM internal change, is not modeled.",
+      "Server-side streaming impact is described differently in the public RCA and an internal post; this page uses the public wording."
+    ],
+    init: function () { return {}; }, tl: [], packets: [], dur: 3600
+  },
+  /* 9 */ {
+    chapter: 3, view: "arch", title: "A rollout step is just a flag change",
+    body: function () { return "Starting a guarded rollout stage is an ordinary flag change: control plane, then flag state, then pushed down the open stream to the SDKs."; },
+    hood: ["Guarded rollouts need the SDK to send evaluation and metric events, with context keys, for the analysis to work."],
+    init: function () { return { dim: ["ingest", "guard"], hl: {}, pills: {}, callout: null, broken: false, note: "", chips: ["off", "stream", "off"], status: { t: "VALID", c: "ok", sub: "streaming" }, store: { text: "flag @ c50 · 100% old", ok: true }, chart: { p: 0, bad: false }, lanes: { stream: { t: "stream", a: 1, dash: false }, poll: { t: "line", a: 0.6, dash: false }, poll2: { t: "line", a: 0.6, dash: false }, events: { t: "line", a: 0.6 }, ing: { t: "line", a: 0.6 }, rollback: { t: "line", a: 0.6 } } }; },
+    tl: [
+      { at: 300, patch: { hl: { control: "blue" }, pills: { chg: { text: "stage: 0% → 10%", c: "blue", x: 1050, y: 40 } } } },
+      { at: 1600, patch: { hl: { control: null, fstore: "blue" } } },
+      { at: 2600, patch: { hl: { fstore: null, stream: "stream" } } },
+      { at: 4300, patch: { hl: { stream: null }, store: { text: "rollout @ 10% (c51)", ok: true }, pills: { chg: null } } }
+    ],
+    packets: [ pk(1000, 600, "ctrl", false, "blue"), pk(1700, 800, "toStreamers", false, "blue"), pk(2700, 1500, "stream", true, "stream", "rollout step c51", "stream") ],
+    dur: 4800
+  },
+  /* 10 */ {
+    chapter: 3, view: "arch", title: "Metrics come back",
+    body: function () { return "As the SDK evaluates the flag it sends evaluation and metric events to event ingestion, which feeds guarded release analysis. Events travel on their own lane, separate from flag delivery."; },
+    hood: [
+      "Hop names between event ingestion and analysis are generic on this page; verify internal component names before sharing.",
+      "The events path is independent of FDv2 flag delivery."
+    ],
+    init: function () { return { dim: [], hl: {}, pills: {}, callout: null }; },
+    tl: [
+      { at: 200, patch: { lanes: { events: { t: "events", a: 1 } }, hl: { ingest: "events" } } },
+      { at: 4000, patch: { lanes: { ing: { t: "events", a: 1 } }, hl: { ingest: null, guard: "events" }, pills: { seq: { text: "sequential test · recalculated about every minute", c: "events", x: 1050, y: 535 } } } }
+    ],
+    ticks: [ { at: 1500, dur: 4500, fn: function (p) { return { chart: { p: p, bad: false } }; } } ],
+    packets: [ pk(300, 1700, "events", false, "events", "eval + metric events", "events"), pk(1200, 1700, "events", false, "events", "eval + metric events", "events"), pk(2100, 1700, "events", false, "events", "eval + metric events", "events"), pk(3000, 1700, "events", false, "events", "eval + metric events", "events"),
+              pk(4100, 1100, "ing", false, "events"), pk(4800, 1100, "ing", false, "events"), pk(5500, 1100, "ing", false, "events") ],
+    dur: 6800
+  },
+  /* 11 */ {
+    chapter: 3, view: "arch", title: "A regression is detected",
+    body: function () { return "Sequential testing compares the new variation with the original and is recalculated about every minute. A significant regression, with automatic rollback turned on, triggers a rollback."; },
+    hood: ["Time to detect depends on traffic and stage size."],
+    init: function () { return { dim: [], callout: null, chart: { p: 1, bad: false } }; },
+    tl: [ { at: 400, patch: { hl: { guard: "fail" }, chart: { p: 1, bad: true }, callout: { text: "Significant regression · auto-rollback is on", c: "fail" } } } ],
+    packets: [], dur: 2600
+  },
+  /* 12 */ {
+    chapter: 3, view: "arch", title: "The rollback rides the same network",
+    body: function () { return "A rollback is an ordinary flag change. It goes control plane to flag state to the open stream, and reaches streaming SDKs in under about 200 ms. There is no separate rollback lane."; },
+    hood: [
+      "An SDK that has fallen back to polling gets the rollback at its next poll.",
+      "FDv2 fallback is what keeps that rollback reachable during a streaming failure."
+    ],
+    init: function () { return { dim: [], callout: null, pills: {}, hl: { guard: "fail" } }; },
+    tl: [
+      { at: 200, patch: { lanes: { rollback: { t: "rollback", a: 1 } } } },
+      { at: 1900, patch: { hl: { guard: null, control: "rollback" }, pills: { seq: null, chg: { text: "rollback = flag change", c: "rollback", x: 1050, y: 40 } } } },
+      { at: 2700, patch: { hl: { control: null, fstore: "rollback" } } },
+      { at: 3500, patch: { hl: { fstore: null, stream: "rollback" } } },
+      { at: 5000, patch: { hl: { stream: null }, store: { text: "rollout @ 0% (c52) · rolled back", ok: true }, pills: { chg: null, ms: { text: "< 200 ms to streaming SDKs", c: "rollback", x: 465, y: 128 } }, callout: { text: "Same stream. No dedicated rollback lane.", c: "rollback" } } }
+    ],
+    packets: [ pk(300, 1500, "rollback", false, "rollback", "rollback", "roll"), pk(2000, 600, "ctrl", false, "rollback"), pk(2800, 800, "toStreamers", false, "rollback"), pk(3500, 1500, "stream", true, "rollback", "rollout @ 0%", "stream") ],
+    dur: 5600
+  },
+  /* 13 */ {
+    chapter: 3, view: "lat", title: "End to end: detection dominates",
+    body: function () { return "Detection takes about a minute; delivery to a streaming SDK is a rounding error on top. An SDK on polling fallback waits up to one poll interval. Move the sliders to see how each changes the total."; },
+    hood: ["Illustrative. Defaults are about 1 minute to detect and a 30 s poll interval.", "Rollback delivery is the same stream as any other change; there is no priority lane."],
+    init: function () { return {}; }, tl: [], packets: [], dur: 1200
+  },
+  /* 14 */ {
+    chapter: 3, view: "recap", title: "Recap",
+    body: function () { return "Streaming is the fast path, polling is the safety net, and a rollback rides the same stream as any other change."; },
+    hood: ["Sources are listed at the bottom of the page."],
+    init: function () { return {}; }, tl: [], packets: [], dur: 800
+  }
+];
+var CHAPTERS = [
+  { name: "Startup and streaming", first: 0 },
+  { name: "When streaming fails", first: 3 },
+  { name: "Oct 20, 2025", first: 7 },
+  { name: "Guarded rollback", first: 9 }
+];
+
+function eventsOf(step) {
+  var ev = (step.tl || []).map(function (e) { return { at: e.at, patch: e.patch }; });
+  (step.ticks || []).forEach(function (t) { ev.push({ at: t.at + t.dur, patch: function () { return t.fn(1); } }); });
+  ev.sort(function (a, b) { return a.at - b.at; });
+  return ev;
+}
+var starts = [];
+function computeStarts() {
+  var s = defaults();
+  starts = [];
+  STEPS.forEach(function (st) {
+    applyInit(s, st.init());
+    starts.push(clone(s));
+    eventsOf(st).forEach(function (e) { apply(s, e.patch); });
+  });
+}
+computeStarts();
+
+/*==DOM==*/
+if (typeof document === "undefined") { if (typeof module !== "undefined") module.exports = { STEPS: STEPS, starts: function () { return starts; }, apply: apply, defaults: defaults }; return; }
+
+var NS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  var e = document.createElementNS(NS, name);
+  if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function $(id) { return document.getElementById(id); }
+function col(tok) { return "var(--" + tok + ")"; }
+function tokColor(tok) { return tok === "line" ? "var(--line)" : "var(--" + tok + ")"; }
+
+/* ============ SVG diagram ============ */
+var svg = $("arch");
+var NODES = {
+  store:  { x: 40, y: 60, w: 260, h: 80, title: "In-memory flag store" },
+  orch:   { x: 40, y: 160, w: 260, h: 170, title: "Orchestrator" },
+  status: { x: 40, y: 350, w: 260, h: 70, title: "SDK status" },
+  eval:   { x: 40, y: 447, w: 260, h: 56, title: "flag.evaluate()  →  served locally" },
+  stream: { x: 660, y: 60, w: 220, h: 80, title: "Streamers (SSE)", sub: "long-lived push connections" },
+  poll:   { x: 660, y: 168, w: 220, h: 80, title: "Polling endpoint", sub: "CDN edge cache · delta by cursor" },
+  control:{ x: 940, y: 60, w: 220, h: 80, title: "Control plane", sub: "flag change · UI, API, rollback" },
+  fstore: { x: 940, y: 168, w: 220, h: 80, title: "Flag state + changelog", sub: "versioned by cursor" },
+  ingest: { x: 660, y: 440, w: 200, h: 70, title: "Event ingestion", sub: "evaluation + metric events" },
+  guard:  { x: 940, y: 440, w: 220, h: 70, title: "Guarded release analysis" },
+  relay:  { x: 400, y: 50, w: 130, h: 270, title: "Relay Proxy", sub: "(optional)" }
+};
+var INFO = {
+  store: "<b>In-memory flag store.</b> The SDK’s copy of the flag payload. Evaluations read from here, so they keep working through delivery failures.",
+  orch: "<b>Orchestrator.</b> Runs initializers in order to load a basis, then synchronizers to keep data current. Fallback and recovery conditions move it between synchronizers.",
+  status: "<b>SDK status.</b> INITIALIZING, VALID or INTERRUPTED. VALID can mean streaming or polling fallback.",
+  eval: "<b>Evaluation.</b> Served locally from the store, and the source of the events used for metrics.",
+  stream: "<b>Streamers.</b> Long-lived SSE connections that push deltas to connected SDKs.",
+  poll: "<b>Polling endpoint.</b> CDN-cached; answers with a delta when the SDK sends its cursor.",
+  control: "<b>Control plane.</b> Where flag changes originate: the UI, the API, or an automatic rollback.",
+  fstore: "<b>Flag state and changelog.</b> Versioned by cursor so SDKs can resume with a delta instead of a full payload.",
+  ingest: "<b>Event ingestion.</b> Receives evaluation and metric events from SDKs. Separate from flag delivery.",
+  guard: "<b>Guarded release analysis.</b> Runs sequential tests on the metrics and can roll back automatically.",
+  relay: "<b>Relay Proxy (optional).</b> Self-hosted intermediary between LaunchDarkly and your SDKs. FDv2 needs Relay Proxy v9 or later, which was still a release candidate as of Aug 2026."
+};
+var PATHS = {
+  poll: "M288 208 L660 208",
+  poll2: "M288 288 L325 288 L325 208",
+  stream: "M288 248 L350 248 L350 100 L660 100",
+  events: "M300 475 L660 475",
+  ing: "M860 475 L940 475",
+  bus1: "M940 208 L880 208",
+  bus2: "M910 208 L910 100 L880 100",
+  ctrl: "M1050 140 L1050 168",
+  rollback: "M1160 475 L1176 475 L1176 100 L1160 100",
+  toStreamers: "M940 208 L910 208 L910 100 L880 100"
+};
+var HEADS = {
+  poll: [[660, 208, 0], [288, 208, 180]],
+  stream: [[660, 100, 0], [288, 248, 180]],
+  events: [[660, 475, 0]], ing: [[940, 475, 0]],
+  bus1: [[880, 208, 180]], bus2: [[880, 100, 180]],
+  ctrl: [[1050, 168, 90]], rollback: [[1160, 100, 180]]
+};
+var LPOS = { poll: [465, 238], stream: [465, 128], events: [480, 502], roll: [1090, 300] };
+
+var gBack = el("g", null, svg);
+el("rect", { x: 20, y: 20, width: 300, height: 520, rx: 14, "class": "container-box" }, gBack);
+el("text", { x: 36, y: 40, "class": "container-label" }, gBack).textContent = "YOUR APP + SDK (FDv2 DATA SYSTEM)";
+el("rect", { x: 640, y: 20, width: 550, height: 260, rx: 14, "class": "container-box" }, gBack);
+el("text", { x: 656, y: 40, "class": "container-label" }, gBack).textContent = "LAUNCHDARKLY FLAG DELIVERY NETWORK";
+
+/* lanes */
+var laneEls = {}, headEls = {};
+var gLanes = el("g", null, svg);
+LANES.forEach(function (n) {
+  laneEls[n] = el("path", { d: PATHS[n], "class": "lane" }, gLanes);
+  headEls[n] = (HEADS[n] || []).map(function (h) {
+    return el("polygon", { points: "0,0 -9,-5.5 -9,5.5", transform: "translate(" + h[0] + "," + h[1] + ") rotate(" + h[2] + ")" }, gLanes);
+  });
+});
+var laneLabels = [
+  [545, 92, "Streaming · SSE", "stream", "start"],
+  [545, 200, "Polling · HTTP GET", "poll", "start"],
+  [400, 466, "Events · HTTP POST", "events", "start"]
+];
+laneLabels.forEach(function (l) {
+  var t = el("text", { x: l[0], y: l[1], "class": "lane-label", "text-anchor": l[4] }, gLanes);
+  t.style.fill = col(l[3]); t.textContent = l[2];
+});
+/* hidden measuring paths for packets */
+var measure = {}, mlen = {};
+Object.keys(PATHS).forEach(function (n) {
+  measure[n] = el("path", { d: PATHS[n], fill: "none", stroke: "none" }, svg);
+  mlen[n] = measure[n].getTotalLength ? measure[n].getTotalLength() : 1;
+});
+
+/* nodes */
+var nodeEls = {};
+var selectedNode = null;
+function buildNode(k) {
+  var n = NODES[k];
+  var g = el("g", { "class": "node" + (k === "relay" ? " relay" : ""), tabindex: "0", role: "button", "aria-label": n.title + ": show details", "data-k": k }, svg);
+  var r = el("rect", { x: n.x, y: n.y, width: n.w, height: n.h, rx: 10, "class": "box" }, g);
+  var o = { g: g, r: r };
+  if (k === "store") {
+    el("text", { x: n.x + 14, y: n.y + 24, "class": "t" }, g).textContent = n.title;
+    o.val = el("text", { x: n.x + 14, y: n.y + 46, "class": "mono" }, g);
+    el("text", { x: n.x + 14, y: n.y + 66, "class": "s" }, g).textContent = "evaluations read from here";
+  } else if (k === "orch") {
+    el("text", { x: n.x + 14, y: n.y + 22, "class": "t" }, g).textContent = n.title;
+  } else if (k === "status") {
+    el("text", { x: n.x + 14, y: n.y + 20, "class": "s" }, g).textContent = "SDK status";
+    o.badge = el("rect", { x: n.x + 14, y: n.y + 28, width: 100, height: 28, rx: 14, "class": "box" }, g);
+    o.btxt = el("text", { x: n.x + 26, y: n.y + 47, "class": "t" }, g);
+    o.bsub = el("text", { x: n.x + 130, y: n.y + 47, "class": "s" }, g);
+  } else if (k === "eval") {
+    el("text", { x: n.x + n.w / 2, y: n.y + 26, "class": "t", "text-anchor": "middle" }, g).textContent = n.title;
+    o.note = el("text", { x: n.x + n.w / 2, y: n.y + 44, "class": "s", "text-anchor": "middle" }, g);
+    o.note.style.fill = col("ok");
+  } else if (k === "guard") {
+    el("text", { x: n.x + 14, y: n.y + 28, "class": "t" }, g).textContent = "Guarded release";
+    el("text", { x: n.x + 14, y: n.y + 46, "class": "t" }, g).textContent = "analysis";
+    o.c1 = el("polyline", { fill: "none", "stroke-width": 2.4, "stroke-linecap": "round", "stroke-linejoin": "round" }, g);
+    o.c2 = el("polyline", { fill: "none", "stroke-width": 2.8, "stroke-linecap": "round", "stroke-linejoin": "round" }, g);
+    o.c1.style.stroke = "var(--ink2)";
+  } else if (k === "relay") {
+    el("text", { x: n.x + n.w / 2, y: n.y + 24, "class": "t", "text-anchor": "middle" }, g).textContent = n.title;
+    el("text", { x: n.x + n.w / 2, y: n.y + 40, "class": "s", "text-anchor": "middle" }, g).textContent = n.sub;
+  } else {
+    el("text", { x: n.x + n.w / 2, y: n.y + n.h / 2 - 4, "class": "t", "text-anchor": "middle" }, g).textContent = n.title;
+    if (n.sub) el("text", { x: n.x + n.w / 2, y: n.y + n.h / 2 + 14, "class": "s", "text-anchor": "middle" }, g).textContent = n.sub;
+  }
+  g.addEventListener("click", function () { selectNode(k); });
+  g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectNode(k); } });
+  nodeEls[k] = o;
+}
+Object.keys(NODES).forEach(buildNode);
+function selectNode(k) {
+  if (selectedNode) nodeEls[selectedNode].g.classList.remove("selected");
+  selectedNode = k; nodeEls[k].g.classList.add("selected");
+  $("nodeInfo").innerHTML = INFO[k];
+}
+/* chips */
+var CHIPY = [192, 232, 272], CHIPTXT = ["Initializer · Poll", "Synchronizer 1 · Stream", "Synchronizer 2 · Poll"];
+var chipEls = CHIPTXT.map(function (t, i) {
+  var g = el("g", { "class": "chip" }, nodeEls.orch.g);
+  var r = el("rect", { x: 52, y: CHIPY[i], width: 236, height: 32, rx: 8 }, g);
+  var tx = el("text", { x: 64, y: CHIPY[i] + 21, "class": "t" }, g); tx.style.fontSize = "12.5px"; tx.textContent = t;
+  var ln = el("line", { x1: 58, x2: 282, y1: CHIPY[i] + 16, y2: CHIPY[i] + 16, "stroke-width": 2 }, g); ln.style.stroke = col("fail");
+  return { r: r, t: tx, ln: ln };
+});
+/* broken marker */
+var brokenEl = el("g", null, svg);
+el("circle", { cx: 590, cy: 100, r: 13, fill: "var(--surface)", "stroke-width": 3 }, brokenEl).style.stroke = col("fail");
+[["M583 93 L597 107"], ["M583 107 L597 93"]].forEach(function (d) { var p = el("path", { d: d[0], "stroke-width": 3, "stroke-linecap": "round" }, brokenEl); p.style.stroke = col("fail"); });
+brokenEl.style.display = "none";
+var gPills = el("g", null, svg);
+var gPackets = el("g", null, svg);
+
+var HL_FILL = function (tok) { return "color-mix(in srgb, var(--" + tok + ") 20%, var(--surface))"; };
+function makePill(parent, text, tok, x, y) {
+  var w = Math.max(40, text.length * 6.7 + 24);
+  var g = el("g", { "class": "pill" }, parent);
+  var r = el("rect", { x: x - w / 2, y: y - 13, width: w, height: 26, rx: 13 }, g);
+  r.style.stroke = tokColor(tok);
+  var t = el("text", { x: x, y: y + 4.5, "text-anchor": "middle" }, g);
+  t.textContent = text;
+  return g;
+}
+var pillEls = {};
+function renderPills(s) {
+  Object.keys(pillEls).forEach(function (id) {
+    var p = s.pills[id], cur = pillEls[id];
+    if (!p || cur.key !== p.text + p.c + p.x + p.y) { gPills.removeChild(cur.g); delete pillEls[id]; }
+  });
+  Object.keys(s.pills).forEach(function (id) {
+    var p = s.pills[id];
+    if (!pillEls[id]) pillEls[id] = { g: makePill(gPills, p.text, p.c, p.x, p.y), key: p.text + p.c + p.x + p.y };
+  });
+}
+
+var state = defaults();
+function render() {
+  var s = state, k;
+  LANES.forEach(function (n) {
+    var l = s.lanes[n], c = tokColor(l.t), e = laneEls[n];
+    e.style.stroke = c; e.style.opacity = l.a;
+    e.setAttribute("stroke-dasharray", l.dash ? "9 7" : "");
+    headEls[n].forEach(function (h) { h.style.fill = c; h.style.opacity = l.a; });
+  });
+  Object.keys(nodeEls).forEach(function (k) {
+    var o = nodeEls[k], tok = s.hl[k];
+    o.r.style.stroke = tok ? col(tok) : "";
+    o.r.style.strokeWidth = tok ? "3.2" : "";
+    o.r.style.fill = tok ? HL_FILL(tok) : "";
+    o.g.style.opacity = s.dim.indexOf(k) >= 0 ? "0.3" : "1";
+  });
+  nodeEls.store.val.textContent = s.store.text;
+  nodeEls.store.val.style.fill = s.store.ok ? col("ok") : "var(--ink2)";
+  var st = s.status, bw = Math.max(110, st.t.length * 8.4 + 26);
+  nodeEls.status.badge.setAttribute("width", bw);
+  nodeEls.status.badge.style.stroke = col(st.c);
+  nodeEls.status.badge.style.fill = HL_FILL(st.c);
+  nodeEls.status.btxt.textContent = st.t;
+  nodeEls.status.bsub.setAttribute("x", 54 + bw);
+  nodeEls.status.bsub.textContent = st.sub;
+  nodeEls.eval.note.textContent = s.note || "";
+  chipEls.forEach(function (c, i) {
+    var v = s.chips[i];
+    var tok = v === "poll" ? "poll" : v === "stream" ? "stream" : (v === "dead" || v === "fail") ? "fail" : null;
+    c.r.style.stroke = tok ? col(tok) : "var(--line)";
+    c.r.style.fill = tok ? HL_FILL(tok) : "var(--surface2)";
+    c.t.style.fill = (v === "off" || v === "dead") ? "var(--ink2)" : "var(--ink)";
+    c.ln.style.display = v === "dead" ? "" : "none";
+  });
+  brokenEl.style.display = s.broken ? "" : "none";
+  /* guard mini chart */
+  var g = nodeEls.guard, n = NODES.guard, pts1 = [], pts2 = [], steps = Math.round(24 * s.chart.p);
+  for (var i = 0; i <= steps; i++) {
+    var f = i / 24, x = n.x + 118 + f * 88, base = n.y + 30;
+    pts1.push(x.toFixed(1) + "," + (base + Math.sin(f * 9) * 2).toFixed(1));
+    pts2.push(x.toFixed(1) + "," + (base + Math.sin(f * 9 + 1) * 2 + Math.max(0, f - 0.35) * 30).toFixed(1));
+  }
+  g.c1.setAttribute("points", pts1.join(" ")); g.c2.setAttribute("points", pts2.join(" "));
+  g.c2.style.stroke = s.chart.bad ? col("fail") : col("poll");
+  renderPills(s);
+  var co = $("callout");
+  if (s.callout) { co.hidden = false; co.textContent = s.callout.text; co.style.borderColor = col(s.callout.c); } else co.hidden = true;
+}
+
+/* ============ packets ============ */
+var activePk = [];
+function easeIO(x) { return x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x); }
+function startPacket(p) {
+  var g = el("g", { "class": "packet" }, gPackets), dots = [];
+  for (var i = 5; i >= 0; i--) {
+    var c = el("circle", { r: i === 0 ? 8 : 7 - i * 0.9 }, g);
+    c.style.fill = tokColor(p.tok); c.style.opacity = i === 0 ? 1 : 0.5 - i * 0.07;
+    dots.push(c);
+  }
+  var lab = null;
+  if (p.label && LPOS[p.lpos]) lab = makePill(gPackets, p.label, p.tok, LPOS[p.lpos][0], LPOS[p.lpos][1]);
+  activePk.push({ p: p, g: g, dots: dots, lab: lab });
+}
+function stopPacket(a) {
+  if (a.g.parentNode) a.g.parentNode.removeChild(a.g);
+  if (a.lab && a.lab.parentNode) a.lab.parentNode.removeChild(a.lab);
+}
+function clearPackets() { activePk.forEach(stopPacket); activePk = []; }
+function placePacket(a, t) {
+  var p = a.p, f = easeIO((t - p.at) / p.dur);
+  if (p.bounce) f = 0.5 * Math.sin(Math.PI * f) * 0.7;
+  var path = measure[p.path], L = mlen[p.path];
+  a.dots.forEach(function (c, idx) {
+    var i = 5 - idx, q = f - i * 0.022;
+    if (q < 0) { c.style.display = "none"; return; }
+    c.style.display = "";
+    var d = (p.rev ? (1 - q) : q) * L, pt = path.getPointAtLength(Math.max(0, Math.min(L, d)));
+    c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y);
+  });
+}
+
+/* ============ timeline views ============ */
+var OCT_ROWS = [
+  { name: "Polling SDKs", sub: "as it happened", segs: [{ l: 0, w: 100, tok: "ok", txt: "operational · typical error rates" }] },
+  { name: "Streaming-only SDKs (US)", sub: "as it happened · no failover", segs: [{ l: 0, w: 40, tok: "stream", txt: "streaming · fresh" }, { l: 40, w: 45, tok: "fail", txt: "no flag updates · stale until streams recover" }, { l: 85, w: 15, tok: "stream", txt: "streaming" }] },
+  { name: "Same SDKs on FDv2", sub: "automatic fallback", segs: [{ l: 0, w: 40, tok: "stream", txt: "streaming · fresh" }, { l: 40, w: 5, tok: "fail", txt: "" }, { l: 45, w: 40, tok: "poll", txt: "polling fallback · updates keep flowing" }, { l: 85, w: 15, tok: "stream", txt: "streaming" }] }
+];
+var octRowEls = [], octSegEls = [];
+(function buildOct() {
+  var rows = $("octRows");
+  OCT_ROWS.forEach(function (r, ri) {
+    var row = document.createElement("div"); row.className = "row";
+    row.innerHTML = '<div class="rl"><b></b><span></span></div><div class="track"></div>';
+    row.querySelector("b").textContent = r.name; row.querySelector("span").textContent = r.sub;
+    var track = row.querySelector(".track"), segEls = [];
+    r.segs.forEach(function (s) {
+      var d = document.createElement("div"); d.className = "seg";
+      d.style.left = s.l + "%"; d.style.width = s.w + "%"; d.style.background = "var(--" + s.tok + ")";
+      d.innerHTML = "<span></span>"; d.firstChild.textContent = s.txt; track.appendChild(d); segEls.push(d);
+    });
+    rows.appendChild(row); octRowEls.push(row); octSegEls.push(segEls);
+  });
+  var marks = $("octMarks");
+  [[40, "outage begins", "fail"], [85, "streams recover", "ok"]].forEach(function (m) {
+    var d = document.createElement("div"); d.className = "mark"; d.style.left = m[0] + "%"; d.style.borderColor = "var(--" + m[2] + ")";
+    d.innerHTML = "<em></em>"; d.firstChild.textContent = m[1]; d.firstChild.style.color = "var(--" + m[2] + ")"; marks.appendChild(d);
+  });
+})();
+var octTimers = [];
+function showOct(stage, instantAll) {
+  octTimers.forEach(clearTimeout); octTimers = [];
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  octSegEls.forEach(function (segs, ri) {
+    var shown = ri < stage + 1;            /* stage 1: rows 0-1; stage 2: rows 0-2 */
+    var animateRow = !instantAll && !reduce && ((stage === 1 && ri <= 1) || (stage === 2 && ri === 2));
+    octRowEls[ri].classList.toggle("muted", !shown);
+    segs.forEach(function (d, si) {
+      d.classList.remove("on", "instant");
+      if (!shown) return;
+      if (!animateRow) { d.classList.add("instant", "on"); return; }
+      void d.offsetWidth;
+      var delay = (ri === 2 ? 0 : ri * 350) + si * 450;
+      octTimers.push(setTimeout(function () { d.classList.add("on"); }, delay / SET.speed + 60));
+    });
+  });
+  var fl = fb();
+  var note = $("octNote");
+  note.hidden = stage !== 2;
+  note.innerHTML = "<b>What this does and doesn’t show.</b> It holds because the polling path stayed up (public RCA: polling SDKs operational). Phase 2, the 11:48 AM internal change, isn’t modeled. The red sliver is the time before fallback fires (" + fl.label + " on this setting).";
+}
+/* latency view */
+function showLat() {
+  var det = +$("sDet").value, poll = +$("sPoll").value, max = 240;
+  $("vDet").textContent = det + " s"; $("vPoll").textContent = poll + " s";
+  var rows = $("latRows");
+  var data = [
+    { n: "Detection", s: "sequential test, recalculated about every minute", tok: "events", l: 0, w: det, v: "≈ " + det + " s" },
+    { n: "Delivery to a streaming SDK", s: "pushed on the open stream", tok: "stream", l: det, w: 0.2, v: "< 200 ms" },
+    { n: "Delivery to an SDK on polling fallback", s: "waits for its next poll", tok: "poll", l: det, w: poll, v: "≤ " + poll + " s" }
+  ];
+  if (!rows.children.length) {
+    data.forEach(function () {
+      var d = document.createElement("div"); d.className = "lat-row";
+      d.innerHTML = '<div><b></b><span></span></div><div class="lat-track"><div class="lat-bar"></div></div><div class="lat-val"></div>';
+      rows.appendChild(d);
+    });
+  }
+  data.forEach(function (r, i) {
+    var d = rows.children[i];
+    d.querySelector("b").textContent = r.n; d.querySelector("span").textContent = r.s;
+    var b = d.querySelector(".lat-bar");
+    b.style.left = (r.l / max * 100) + "%"; b.style.width = (r.w / max * 100) + "%"; b.style.background = "var(--" + r.tok + ")";
+    d.querySelector(".lat-val").textContent = r.v;
+  });
+  $("latTotals").innerHTML =
+    '<div class="total"><span>Regression to corrected flag, streaming SDK</span><b>≈ ' + det + ' s</b></div>' +
+    '<div class="total"><span>Regression to corrected flag, SDK on polling fallback</span><b>up to ' + (det + poll) + ' s</b></div>';
+}
+$("sDet").addEventListener("input", showLat); $("sPoll").addEventListener("input", showLat);
+/* recap view */
+(function buildRecap() {
+  var items = [
+    ["stream", "Streaming first, polling as the safety net", "Automatic in both directions, and every reconnect resumes from a cursor."],
+    ["poll", "Oct 20, 2025: failover keeps updates flowing", "Streaming failure, then polling after the threshold, then streaming again. It needs the polling path to stay up."],
+    ["rollback", "Rollbacks ride the same stream", "About a minute to detect, under 200 ms to deliver to streaming SDKs, and the next poll for SDKs on fallback."]
+  ];
+  var h = items.map(function (i) { return '<div class="take" style="border-color:var(--' + i[0] + ')"><b>' + i[1] + '</b><span>' + i[2] + '</span></div>'; }).join("");
+  h += '<div class="verify"><h3>Verify before sharing outside Flag Delivery</h3><ul>' +
+    '<li>Fallback and recovery thresholds: 2 min and 5 min (C++ SDK, AaW page) versus 60 s fallback in the Go test matrix.</li>' +
+    '<li>Hop names between SDK events and guarded release analysis are generic.</li>' +
+    '<li>Oct 2025 server-side streaming scope differs between the public RCA and internal posts.</li>' +
+    '<li>Relay Proxy v9 was still a release candidate as of Aug 2026; FDv2 through a relay needs it.</li></ul></div>';
+  $("recapBody").innerHTML = h;
+})();
+/* legend */
+$("legend").innerHTML = [["stream", "Streaming (SSE)"], ["poll", "Polling (HTTP)"], ["fail", "Failure"], ["events", "Events and metrics"], ["rollback", "Rollback"], ["blue", "Flag change"]]
+  .map(function (l) { return '<span><i style="background:var(--' + l[0] + ')"></i>' + l[1] + '</span>'; }).join("");
+
+/* ============ runner ============ */
+var runId = 0, cur = 0, elapsed = 0, firedIdx = 0, evs = [], running = false, raf = 0, last = 0, autoTimer = 0, seenMax = 0;
+var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var VIEWS = { arch: "vArch", oct: "vOct", lat: "vLat", recap: "vRecap" };
+
+function showView(name) { Object.keys(VIEWS).forEach(function (k) { $(VIEWS[k]).hidden = k !== name; }); }
+function stopLoop() { running = false; cancelAnimationFrame(raf); clearTimeout(autoTimer); }
+
+function goto(i, instant) {
+  stopLoop(); clearPackets();
+  var myRun = ++runId;
+  i = Math.max(0, Math.min(STEPS.length - 1, i)); cur = i; seenMax = Math.max(seenMax, i);
+  var st = STEPS[i];
+  STEPS.forEach(function (s) { (s.packets || []).forEach(function (p) { p._done = false; }); });
+  state = clone(starts[i]);
+  /* caption */
+  var ch = CHAPTERS[st.chapter];
+  $("capMeta").textContent = "Step " + (i + 1) + " of " + STEPS.length + " · " + ch.name;
+  $("capTitle").textContent = st.title;
+  $("capBody").textContent = st.body();
+  $("hoodList").innerHTML = st.hood.map(function (h) { return "<li></li>"; }).join("");
+  Array.prototype.forEach.call($("hoodList").children, function (li, k) { li.textContent = st.hood[k]; });
+  $("btnBack").disabled = i === 0;
+  $("btnNext").textContent = i === STEPS.length - 1 ? "Start over" : "Next step";
+  Array.prototype.forEach.call($("chapters").children, function (b, k) { b.setAttribute("aria-current", k === st.chapter ? "true" : "false"); });
+  Array.prototype.forEach.call($("dots").children, function (b, k) { b.setAttribute("aria-current", k === i ? "true" : "false"); b.classList.toggle("past", k < i); });
+  showView(st.view);
+  if (st.view === "arch") {
+    render();
+    evs = eventsOf(st); firedIdx = 0; elapsed = 0;
+    if (reduceMotion || instant) { evs.forEach(function (e) { apply(state, e.patch); }); render(); finishStep(); return; }
+    last = 0; running = true; raf = requestAnimationFrame(loop);
+  } else {
+    if (st.view === "oct") showOct(st.stage, !!instant);
+    if (st.view === "lat") showLat();
+    setTimeout(function () { if (myRun === runId) finishStep(); }, reduceMotion ? 0 : st.dur / SET.speed);
+  }
+}
+function finishStep() { running = false; scheduleAuto(); }
+function scheduleAuto() {
+  clearTimeout(autoTimer);
+  if (!SET.auto || cur >= STEPS.length - 1) return;
+  var words = STEPS[cur].body().length;
+  var wait = Math.min(11000, Math.max(3200, words * 42)) / SET.speed;
+  autoTimer = setTimeout(function () { goto(cur + 1); }, wait);
+}
+function loop(ts) {
+  if (!running) return;
+  if (!last) last = ts;
+  var dt = Math.min(64, ts - last) * SET.speed; last = ts; elapsed += dt;
+  var st = STEPS[cur];
+  while (firedIdx < evs.length && evs[firedIdx].at <= elapsed) { apply(state, evs[firedIdx].patch); firedIdx++; }
+  (st.ticks || []).forEach(function (t) { if (elapsed >= t.at && elapsed < t.at + t.dur) apply(state, t.fn((elapsed - t.at) / t.dur)); });
+  render();
+  /* packets */
+  (st.packets || []).forEach(function (p) {
+    var live = activePk.filter(function (a) { return a.p === p; })[0];
+    var inWin = elapsed >= p.at && elapsed <= p.at + p.dur;
+    if (inWin && !live && !p._done) { startPacket(p); live = activePk[activePk.length - 1]; }
+    if (live && inWin) placePacket(live, elapsed);
+    if (live && !inWin) { stopPacket(live); activePk.splice(activePk.indexOf(live), 1); }
+    if (elapsed > p.at + p.dur) p._done = true; else if (elapsed < p.at) p._done = false;
+  });
+  if (elapsed >= st.dur) {
+    clearPackets(); (st.packets || []).forEach(function (p) { p._done = false; });
+    state = clone(starts[cur]); evs.forEach(function (e) { apply(state, e.patch); }); render(); finishStep(); return;
+  }
+  raf = requestAnimationFrame(loop);
+}
+
+/* ============ controls ============ */
+(function buildNav() {
+  CHAPTERS.forEach(function (c, k) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "chapter"; b.textContent = c.name;
+    b.addEventListener("click", function () { goto(c.first); }); $("chapters").appendChild(b);
+  });
+  STEPS.forEach(function (s, k) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "dot";
+    b.setAttribute("aria-label", "Step " + (k + 1) + ": " + s.title); b.title = (k + 1) + ". " + s.title;
+    b.addEventListener("click", function () { goto(k); }); $("dots").appendChild(b);
+  });
+})();
+$("btnBack").addEventListener("click", function () { goto(cur - 1); });
+$("btnNext").addEventListener("click", function () { goto(cur >= STEPS.length - 1 ? 0 : cur + 1); });
+$("btnReplay").addEventListener("click", function () { goto(cur); });
+$("auto").addEventListener("change", function (e) { SET.auto = e.target.checked; if (SET.auto && !running) scheduleAuto(); else clearTimeout(autoTimer); });
+$("speed").addEventListener("change", function (e) { SET.speed = +e.target.value; });
+$("fb").addEventListener("change", function (e) { SET.fb = e.target.value; computeStarts(); goto(cur); });
+document.addEventListener("keydown", function (e) {
+  var tag = (e.target && e.target.tagName) || "";
+  if (tag === "SELECT" || tag === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "ArrowRight") { e.preventDefault(); goto(cur + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); goto(cur - 1); }
+  else if (e.key === "r" || e.key === "R") { goto(cur); }
+});
+
+var m = /^#s(\d+)$/.exec(location.hash || ""), startAt = m ? Math.max(0, Math.min(STEPS.length - 1, +m[1] - 1)) : 0;
+goto(startAt);
+})();
+</script>
+</body>
+</html>
