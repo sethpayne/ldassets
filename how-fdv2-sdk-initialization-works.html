@@ -191,11 +191,6 @@ svg text { fill: var(--ink); }
 .kv dd { margin: 0; font-weight: 600; }
 .kv .mono { font-family: var(--mono); }
 .why { margin: 0 0 8px; font-size: 14px; color: var(--ink2); }
-.events { margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12.5px; }
-.events li { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
-.events li:last-child { border-bottom: 0; }
-.events .e { font-weight: 700; min-width: 15ch; }
-.events .d { color: var(--ink2); }
 .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stepkb { color: var(--ink2); font-size: 14px; margin-bottom: 10px; }
 .bar { margin-top: 8px; }
@@ -205,6 +200,19 @@ svg text { fill: var(--ink); }
 .bar .bf { height: 100%; border-radius: 5px; transition: width 0.4s ease; min-width: 3px; }
 .bar.cur .bl span { color: var(--ink); font-weight: 700; }
 .muted { color: var(--ink2); font-size: 14px; margin: 0; }
+.kv dd.mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+.wire { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+.wire-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.wire-top h3 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink2); }
+.wire-top span { color: var(--ink2); font-size: 13px; }
+.wire pre {
+  margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+  background: color-mix(in srgb, var(--surface2) 55%, var(--surface)); border-radius: 10px; padding: 12px 14px;
+  max-height: 340px; overflow-y: auto; color: var(--ink);
+}
+.wire .c { color: var(--ink2); font-style: italic; }
+.wire .ev { font-weight: 700; }
+.wire .gap { display: block; height: 0.6em; }
 .muted.note { font-size: 13px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch; }
@@ -236,6 +244,16 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
       <input type="range" id="k" min="0" max="60" step="1">
       <small>Flag changes on the service after the SDK’s selector was issued.</small>
     </div>
+    <div class="ctl" id="cD">
+      <label for="d">Time disconnected <output id="dOut"></output></label>
+      <input type="range" id="d" min="0.5" max="30" step="0.5">
+      <small>How old the SDK’s selector is when it presents it again.</small>
+    </div>
+    <div class="ctl" id="cR">
+      <label for="r">Server delta retention <output id="rOut"></output></label>
+      <input type="range" id="r" min="1" max="30" step="1">
+      <small>Illustrative, based on the Relay MegaStream tech spec; verify before presenting.</small>
+    </div>
     <div class="ctl" id="cP">
       <label for="p">Persistent store</label>
       <div class="row"><input type="checkbox" id="p"><small>Keeps flags and the selector across restarts.</small></div>
@@ -258,7 +276,7 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
       <div class="dots" id="dots" role="group" aria-label="Steps"></div>
     </div>
     <div class="predict" id="predict" hidden>
-      <p class="q">Predict first: what will the server send?</p>
+      <p class="q">Predict first: what will the SDK get?</p>
       <p class="ctx" id="predictCtx"></p>
       <div class="choices">
         <button class="btn" type="button" data-guess="full">Full payload</button>
@@ -287,6 +305,11 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
     </div>
   </section>
 
+  <section class="wire" aria-label="Wire view">
+    <div class="wire-top"><h3>Wire view</h3><span id="wireMeta"></span></div>
+    <pre id="wire"></pre>
+  </section>
+
   <section class="inspector" aria-label="SDK state inspector">
     <div class="card">
       <h3>Data store</h3>
@@ -297,12 +320,12 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
     <div class="card">
       <h3>SDK state</h3>
       <dl class="kv" id="iKv"></dl>
-      <p class="muted note">A selector is a version and an opaque state string. The SDK stores the pair and echoes it back on its next connect or poll; it never interprets the state string. Only the service knows how many changes it has missed.</p>
+      <p class="muted note">The SDK treats the selector as opaque: it stores the state string from payload-transferred, presents it on reconnect, and never interprets it. Only the service knows what has changed since.</p>
     </div>
     <div class="card">
       <h3>Last response</h3>
+      <p class="sum" id="iIntent"></p>
       <p class="why" id="iWhy"></p>
-      <ol class="events" id="iEv"></ol>
     </div>
     <div class="card">
       <h3>Bytes received</h3>
@@ -313,7 +336,7 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
   </section>
 
   <footer>
-    Teaching model. Flag counts, payload sizes, and retention measured in changes are illustrative; this is not LaunchDarkly’s actual retention implementation or wire format sizes. Tip: add #cold, #warm, #short, #long, #restart, #persist, #fallback, or #fleet to the link to open a scenario.
+    This is a teaching model with illustrative sizes and retention, not a measurement of LaunchDarkly’s production behavior. Tip: add #cold, #short, #long, #nochange, #restart, #persist, #warm, #fallback, or #fleet to the link to open a scenario.
   </footer>
 </div>
 
@@ -322,34 +345,38 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
 "use strict";
 
 /* ============ teaching model (pure) ============ */
-var NF = 48, PUT = 1.5, DEL = 0.1, META = 0.2, NONE = 0.05, LOGN = 64;
+var NF = 48, PUT = 1.5, DEL = 0.1, META = 0.2, LOGN = 64, BASE = 461, DAYS_PER_CHANGE = 0.25;
 
 /* ============ SELECTOR FORMAT (the only place selectors are rendered) ============
-   A selector is a pair: a numeric version and an opaque state string. The SDK stores the pair and
-   echoes it back on its next connect or poll; it never interprets the state string. The number
-   passed in is this simulation's change index. Change SELECTOR if the real format differs. */
+   The selector is the state string from payload-transferred: (p:<payloadId>:<version>).
+   The SDK treats it as opaque: it stores it and presents it on reconnect, and never interprets it.
+   short() is a display-only truncation for tight labels; the wire view always shows state().
+   Change SELECTOR if the real format differs. */
 var SELECTOR = {
+  PAYLOAD_ID: "5A46PZ79FQ9D08YYKT79DECDNV",
   NONE: "none",
-  version: function (n) { return String(n); },
-  state: function (n) { return "state-" + n; },
-  pair: function (n) { return "(" + SELECTOR.version(n) + ", \"" + SELECTOR.state(n) + "\")"; }
+  state: function (v) { return "(p:" + SELECTOR.PAYLOAD_ID + ":" + v + ")"; },
+  short: function (v) { return "(p:" + SELECTOR.PAYLOAD_ID.slice(0, 4) + "…:" + v + ")"; }
 };
-function selTok(n) { return n == null ? SELECTOR.NONE : SELECTOR.pair(n); }
-function selVer(n) { return n == null ? SELECTOR.NONE : SELECTOR.version(n); }
-function selState(n) { return n == null ? SELECTOR.NONE : SELECTOR.state(n); }
+function selFull(v) { return v == null ? SELECTOR.NONE : SELECTOR.state(v); }
+function selShort(v) { return v == null ? SELECTOR.NONE : SELECTOR.short(v); }
 
-/* Fixed and illustrative: the service's retained history is not configurable. */
-var RETAIN = 30;
+var KEYS = ["sampleflag", "new-checkout", "dark-mode", "search-v2", "old-banner", "pricing-page", "onboarding-tour", "beta-dashboard",
+  "rate-limit", "image-cdn", "chat-widget", "promo-header", "recommendations", "mobile-nav", "export-csv", "sso-login",
+  "billing-v3", "feature-tips", "api-v2", "cache-ttl", "analytics-sink", "holiday-theme", "signup-flow", "referral-bonus",
+  "live-chat", "two-factor-prompt", "maintenance-mode", "gallery-grid", "new-editor", "ai-summary", "notifications-v2", "faq-section",
+  "checkout-upsell", "store-locator", "video-autoplay", "legacy-reports", "cookie-banner", "dynamic-pricing", "quick-search", "profile-v2",
+  "status-page", "sidebar-collapse", "map-tiles", "email-digest", "theme-picker", "early-access", "audit-log", "kill-switch"];
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function pl(n, w) { return n === 1 ? w : w + "s"; }
 function flagOf(v) { return (v * 17) % NF; }
 function isDel(v) { return v % 13 === 0; }
-function fname(f) { return "flag-" + (f < 10 ? "0" : "") + f; }
+function fname(f) { return KEYS[f]; }
 function kb(n) { return n >= 1000 ? (n / 1000).toFixed(2) + " MB" : (n < 100 ? n.toFixed(1) : Math.round(n)) + " KB"; }
+function days(d) { return d < 1 ? Math.round(d * 24) + " " + pl(Math.round(d * 24), "hour") : d + " " + pl(d, "day"); }
 
-/* Server state after change index V: every flag starts present, then each change v puts or deletes flagOf(v).
-   Change indexes are internal bookkeeping; anything shown as a selector goes through SELECTOR. */
+/* Server state after change V: every flag starts present, then each change v puts or deletes flagOf(v). */
 function storeAt(V) {
   var st = {}, f, v;
   for (f = 0; f < NF; f++) st[f] = 0;
@@ -363,44 +390,67 @@ function changesSince(s, V) {
 }
 function fullKb(V) { return Object.keys(storeAt(V)).length * PUT + META; }
 
-/* The selector decides the answer: none, a delta from retained history, or a full payload. */
-function decide(sel, V, H) {
-  var d = { sel: sel, V: V, H: H, gap: sel == null ? null : V - sel };
-  if (sel == null) d.kind = "full";
+/* The basis decides the server-intent: none, xfer-changes within retention, or xfer-full. */
+function decide(sel, V, age, R) {
+  var d = { sel: sel, V: V, age: age, R: R, gap: sel == null ? null : V - sel };
+  if (sel == null) { d.kind = "full"; d.reason = "payload-missing"; }
   else if (sel >= V) d.kind = "none";
-  else if (V - sel <= H) d.kind = "changes";
-  else d.kind = "full";
+  else if (age > R) { d.kind = "full"; d.reason = "cant-catchup"; }
+  else d.kind = "changes";
   if (d.kind === "full") { d.n = Object.keys(storeAt(V)).length; d.kb = d.n * PUT + META; }
   else if (d.kind === "changes") {
     d.list = changesSince(sel, V);
     d.dels = d.list.filter(function (c) { return c.del; }).length;
     d.puts = d.list.length - d.dels; d.n = d.list.length;
     d.kb = d.puts * PUT + d.dels * DEL + META;
-  } else { d.n = 0; d.kb = NONE; }
+  } else { d.n = 0; d.kb = META; }
   return d;
 }
-var KIND = { full: "Full payload", changes: "Delta", none: "Nothing" };
-var KTOK = { full: "full", changes: "ok", none: "none" };
+var KIND = { full: "Full payload", changes: "Delta", none: "Nothing", update: "Partial update" };
+var KTOK = { full: "full", changes: "ok", none: "none", update: "ok" };
+var INTENT = { full: "xfer-full", changes: "xfer-changes", none: "none" };
 
 function explain(d) {
-  if (d.sel == null) return "No selector means no basis for a delta, so the server sends every flag.";
-  if (d.kind === "none") return "The service has no changes since this selector, so there is nothing to send.";
-  if (d.kind === "changes") return "The service counts " + d.gap + " " + pl(d.gap, "change") + " missed since this selector and retains " + d.H + ", so it sends only the " + d.n + " changed " + pl(d.n, "object") + ".";
-  return "The service counts " + d.gap + " changes missed since this selector but retains only " + d.H + ", so it can’t build a delta and sends every flag.";
+  if (d.kind === "update") return "After payload-transferred, further put/delete events on the same stream are partial updates and need no new server-intent.";
+  if (d.reason === "payload-missing") return "No selector means no basis, so the server sends xfer-full with reason payload-missing.";
+  if (d.kind === "none") return "The selector matches the current payload, so the server sends server-intent none, then payload-transferred with the same selector.";
+  if (d.kind === "changes") return "The selector is " + days(d.age) + " old, within the server’s delta retention of " + days(d.R) + ", so it sends xfer-changes with only the " + d.n + " changed " + pl(d.n, "object") + ".";
+  return "The selector is " + days(d.age) + " old, beyond the server’s delta retention of " + days(d.R) + ", so it can’t catch up and sends xfer-full with reason cant-catchup.";
 }
 function outcome(lead, d) {
-  var w = lead + " with " + (d.sel == null ? "no selector" : "selector " + selTok(d.sel));
-  if (d.kind === "none") return w + " and gets server-intent none: it is already current.";
-  if (d.kind === "changes") return w + " and gets a delta of " + d.n + " " + pl(d.n, "object") + ", ending in selector " + selTok(d.V) + ".";
-  if (d.sel == null) return w + " and gets the full payload of " + d.n + " flags, ending in selector " + selTok(d.V) + ".";
-  return w + ", which predates the retained history, so it gets the full payload instead of a delta.";
+  var w = lead + " with " + (d.sel == null ? "no selector" : "selector " + selShort(d.sel));
+  if (d.kind === "none") return w + " and gets server-intent none, then payload-transferred with the same selector.";
+  if (d.kind === "changes") return w + " and gets xfer-changes with " + d.n + " " + pl(d.n, "object") + ", ending in selector " + selShort(d.V) + ".";
+  if (d.reason === "payload-missing") return w + " and gets xfer-full (payload-missing) with all " + d.n + " flags.";
+  return w + ", which is older than the server’s delta retention, so it gets xfer-full (cant-catchup).";
+}
+
+/* Wire events, in the documented shapes. */
+function wev(name, data) { return "event: " + name + "\ndata: " + JSON.stringify(data); }
+function intentEv(V, code, reason) {
+  var p = { id: SELECTOR.PAYLOAD_ID, target: V, intentCode: code };
+  if (reason) p.reason = reason;
+  return wev("server-intent", { payloads: [p] });
+}
+function putEv(f, v) {
+  return wev("put-object", { key: KEYS[f], kind: "flag", version: v,
+    object: { key: KEYS[f], on: v % 2 === 1, fallthrough: { variation: 0 }, offVariation: 1, variations: [true, false] } });
+}
+function delEv(f, v) { return wev("delete-object", { kind: "flag", key: KEYS[f], version: v }); }
+function xferEv(V) { return wev("payload-transferred", { state: SELECTOR.state(V), id: SELECTOR.PAYLOAD_ID, version: V }); }
+function objEvents(list, max) {
+  list = list.filter(function (c) { return c.del; }).concat(list.filter(function (c) { return !c.del; }));
+  var out = list.slice(0, max).map(function (c) { return c.del ? delEv(c.f, c.v) : putEv(c.f, c.v); });
+  if (list.length > max) out.push("# … " + (list.length - max) + " more " + pl(list.length - max, "event") + " like these");
+  return out;
 }
 
 function newSim(C, V, fleet) {
   return {
-    V: V, H: RETAIN, P: C.P, fleet: fleet ? C.N : 0, up: true, store: null, sel: null, via: "", active: null,
+    V: V, R: C.R, P: C.P, fleet: fleet ? C.N : 0, up: true, store: null, sel: null, age: 0, via: "", active: null,
     chips: { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" },
-    disk: null, net: "off", fresh: [], updated: [], removed: [], bytes: { step: 0, total: 0 }, last: null, fleetSt: "empty"
+    disk: null, net: "off", fresh: [], updated: [], removed: [], bytes: { step: 0, total: 0 }, last: null, fleetSt: "empty",
+    mark: null, markEnd: null, gapDays: 0
   };
 }
 function recorder(s) {
@@ -409,60 +459,90 @@ function recorder(s) {
     list: list,
     add: function (text, o) {
       o = o || {};
-      list.push({ text: text, up: o.up || [], down: o.down || [], dec: o.dec || null, after: clone(s) });
+      list.push({ text: text, up: o.up || [], down: o.down || [], wire: o.wire || [], dec: o.dec || null, after: clone(s) });
       s.fresh = []; s.updated = []; s.removed = []; s.bytes.step = 0;
     }
   };
 }
-function change(s, n) { for (var i = 0; i < n; i++) { s.V++; s.fresh.push(s.V); } }
+/* n changes land over d days while the SDK's selector ages by d days. */
+function change(s, n, d) {
+  s.mark = s.V;
+  for (var i = 0; i < n; i++) { s.V++; s.fresh.push(s.V); }
+  s.markEnd = s.V; s.gapDays = d || 0; s.age += d || 0;
+}
 function loaded(s, V, via) { s.store = storeAt(V); s.sel = V; s.via = via; }
 function pre(s) { return s.fleet ? "×" + s.fleet + " " : ""; }
 function req(s, t, tok, fail) { return { t: pre(s) + t, tok: tok, fail: !!fail }; }
-function gapText(k, when) {
-  return k ? k + " flag " + pl(k, "change") + " " + (k === 1 ? "lands" : "land") + " on the service " + when + "." : "Nothing changes on the service " + when + ".";
+function reqWire(s, what, sel, fail) {
+  return "# SDK → service" + (s.fleet ? " (each of " + s.fleet + " containers)" : "") + ": " + what +
+    (sel == null ? ", presenting no selector" : ", presenting selector " + SELECTOR.state(sel)) + (fail ? " · no response" : "");
+}
+function gapText(k, d, when) {
+  var over = d ? " over " + days(d) : "";
+  return k ? k + " flag " + pl(k, "change") + " " + (k === 1 ? "lands" : "land") + " on the service" + over + " " + when + "." : "Nothing changes on the service" + over + " " + when + ".";
 }
 
-/* The server answers a connect or poll: put/delete objects, then payload-transferred with the new selector. */
+/* The server answers a connect or poll: server-intent, put/delete objects, then payload-transferred. */
 function answer(s, sel) {
-  var d = decide(sel, s.V, s.H), mult = s.fleet || 1, down = [], ev = [], prev = s.store || {};
+  var d = decide(sel, s.V, s.age, s.R), mult = s.fleet || 1, down = [], wire = [], prev = s.store || {};
+  var tok = KTOK[d.kind], intent = INTENT[d.kind];
+  down.push(["server-intent · " + intent + (d.reason ? " (" + d.reason + ")" : ""), tok]);
+  if (s.fleet) wire.push("# each of " + s.fleet + " containers receives:");
+  wire.push(intentEv(s.V, intent, d.reason));
   if (d.kind === "full") {
     var live = storeAt(s.V), keys = Object.keys(live);
     s.store = live;
     s.updated = keys.map(Number);
     s.removed = Object.keys(prev).filter(function (k) { return !(k in live); }).map(Number);
-    down = [["server-intent · xfer-full", "full"], ["put-object × " + keys.length, "full"]];
-    ev.push(["server-intent", "xfer-full"]);
-    keys.slice(0, 3).forEach(function (k) { ev.push(["put-object", fname(+k)]); });
-    ev.push(["…", (keys.length - 3) + " more put-object"]);
+    down.push(["put-object × " + keys.length, tok]);
+    wire = wire.concat(objEvents(keys.map(function (k) { return { f: +k, v: live[k], del: false }; }), 2));
     s.via = "full payload";
   } else if (d.kind === "changes") {
     var st = clone(prev);
     s.updated = []; s.removed = [];
     d.list.forEach(function (c) { if (c.del) { delete st[c.f]; s.removed.push(c.f); } else { st[c.f] = c.v; s.updated.push(c.f); } });
     s.store = st;
-    down = [["server-intent · xfer-changes", "ok"]];
-    if (d.puts) down.push(["put-object × " + d.puts, "ok"]);
-    if (d.dels) down.push(["delete-object × " + d.dels, "ok"]);
-    ev.push(["server-intent", "xfer-changes"]);
-    d.list.slice(0, 5).forEach(function (c) { ev.push([c.del ? "delete-object" : "put-object", fname(c.f)]); });
-    if (d.list.length > 5) ev.push(["…", (d.list.length - 5) + " more"]);
+    if (d.puts) down.push(["put-object × " + d.puts, tok]);
+    if (d.dels) down.push(["delete-object × " + d.dels, tok]);
+    wire = wire.concat(objEvents(d.list, 6));
     s.via = "delta";
-  } else {
-    down = [["server-intent · none", "none"]];
-    ev.push(["server-intent", "none"]);
   }
-  if (d.kind !== "none") { down.push(["payload-transferred · " + selTok(s.V), KTOK[d.kind]]); ev.push(["payload-transferred", "new selector " + selTok(s.V)]); }
-  s.sel = s.V;
+  down.push(["payload-transferred · " + selShort(s.V), tok]);
+  wire.push(xferEv(s.V));
+  s.sel = s.V; s.age = 0;
   s.bytes.step += d.kb * mult; s.bytes.total += d.kb * mult;
   delete d.list;
-  s.last = { d: d, ev: ev };
+  s.last = { d: d };
   if (s.P && !s.fleet) s.disk = s.sel;
-  return { d: d, down: down.map(function (x) { return { t: pre(s) + x[0], tok: x[1] }; }) };
+  return { d: d, down: down.map(function (x) { return { t: pre(s) + x[0], tok: x[1] }; }), wire: wire };
+}
+
+/* Partial updates on an already-open stream: put/delete events, then payload-transferred; no server-intent. */
+function push(s, unknownKind) {
+  var list = changesSince(s.sel, s.V), st = clone(s.store), down = [], wire = [], kbs = META;
+  s.updated = []; s.removed = [];
+  list.forEach(function (c) { if (c.del) { delete st[c.f]; s.removed.push(c.f); } else { st[c.f] = c.v; s.updated.push(c.f); } kbs += c.del ? DEL : PUT; });
+  s.store = st;
+  wire = objEvents(list, 6);
+  down.push(["put-object × " + list.length, "ok"]);
+  if (unknownKind) {
+    down.push(["put-object · unknown kind, skipped", "none"]);
+    wire.push("# an object of a kind this SDK doesn’t know (illustrative kind name): skipped for forward compatibility");
+    wire.push(wev("put-object", { key: "example-object", kind: "example-future-kind", version: s.V, object: {} }));
+    kbs += 0.1;
+  }
+  down.push(["payload-transferred · " + selShort(s.V), "ok"]);
+  wire.push(xferEv(s.V));
+  s.sel = s.V; s.age = 0;
+  s.bytes.step += kbs; s.bytes.total += kbs;
+  s.last = { d: { kind: "update", n: list.length, kb: kbs, V: s.V } };
+  if (s.P && !s.fleet) s.disk = s.sel;
+  return { down: down.map(function (x) { return { t: x[0], tok: x[1] }; }), wire: wire };
 }
 
 /* ============ scenarios ============ */
 function buildCold(C) {
-  var s = newSim(C, 120), r = recorder(s), a;
+  var s = newSim(C, BASE), r = recorder(s), a;
   r.add("The process starts with an empty data store and no selector.");
   if (C.P) {
     s.active = "cache"; s.chips.cache = "empty";
@@ -470,138 +550,158 @@ function buildCold(C) {
   }
   s.active = "poll"; s.chips.poll = "done";
   a = answer(s, null);
-  r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+  r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d,
+    wire: [reqWire(s, "polling initializer request", null)].concat(a.wire) });
+  var from = s.sel;
   s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
-  a = answer(s, s.sel);
-  r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
+  a = answer(s, from);
+  r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · " + selShort(from), "stream")], down: a.down,
+    wire: [reqWire(s, "streaming connect", from)].concat(a.wire) });
   change(s, 1);
-  a = answer(s, s.sel);
-  r.add("A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector " + selTok(s.V) + ".", { down: a.down });
-  return r.list;
-}
-
-function buildWarm(C) {
-  var V = 130, base = V - C.k, s = newSim(C, V), r = recorder(s), a;
-  if (C.P) s.disk = base;
-  r.add(C.P ? "A new process starts with nothing in memory, but the persistent store already holds flags and selector " + selTok(base) + ", written by another instance." :
-    "A new process starts with nothing in memory, and with no persistent store configured there is nothing to boot from.");
-  if (C.P) {
-    s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
-    loaded(s, base, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
-    r.add("Initializer 1 loads flags and selector " + selTok(base) + " from the persistent store, so the SDK can evaluate before any network call and skips the polling initializer.");
-    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
-    a = answer(s, base);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(base), "stream")], down: a.down, dec: a.d });
-  } else {
-    s.active = "poll"; s.chips.poll = "done";
-    a = answer(s, null);
-    r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
-    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
-    a = answer(s, s.sel);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
-  }
+  a = push(s, true);
+  r.add("A flag change arrives on the open stream as put-object with no new server-intent, and the SDK skips an object of a kind it doesn’t know.", { down: a.down, wire: a.wire });
   return r.list;
 }
 
 function buildGap(C) {
-  var s = newSim(C, 120), r = recorder(s), a;
-  loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
+  var s = newSim(C, BASE), r = recorder(s), a;
+  loaded(s, BASE, "full payload"); s.active = "stream"; s.net = "stream";
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
-  if (C.P) s.disk = 120;
-  r.add("The SDK is streaming with selector " + selTok(120) + " and every flag in memory.");
+  if (C.P) s.disk = BASE;
+  r.add("The SDK is streaming with selector " + selShort(BASE) + " and every flag in memory.");
   s.net = "broken"; s.chips.stream = "retry";
   r.add("The stream drops, and the SDK keeps evaluating from its in-memory store while it retries.");
-  change(s, C.k);
-  r.add(gapText(C.k, "while the SDK is disconnected"));
+  change(s, C.k, C.D);
+  r.add(gapText(C.k, C.D, "while the SDK is disconnected"));
   s.net = "stream"; s.chips.stream = "active";
-  a = answer(s, 120);
-  r.add(outcome("The stream reconnects", a.d), { up: [req(s, "connect · " + selTok(120), "stream")], down: a.down, dec: a.d });
+  a = answer(s, BASE);
+  r.add(outcome("The stream reconnects", a.d), { up: [req(s, "connect · " + selShort(BASE), "stream")], down: a.down, dec: a.d,
+    wire: [reqWire(s, "streaming reconnect", BASE)].concat(a.wire) });
   return r.list;
 }
+function buildNoChange(C) { return buildGap({ k: 0, D: C.D, R: C.R, P: C.P, N: C.N }); }
 
 function buildRestart(C) {
-  var s = newSim(C, 120), r = recorder(s), a;
-  loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
+  var s = newSim(C, BASE), r = recorder(s), a;
+  loaded(s, BASE, "full payload"); s.active = "stream"; s.net = "stream";
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
-  if (C.P) s.disk = 120;
-  r.add(C.P ? "The SDK is streaming with selector " + selTok(120) + " and mirroring its data to a persistent store." : "The SDK is streaming with selector " + selTok(120) + ", its flags held only in memory.");
+  if (C.P) s.disk = BASE;
+  r.add(C.P ? "The SDK is streaming with selector " + selShort(BASE) + " and mirroring its data to a persistent store." : "The SDK is streaming with selector " + selShort(BASE) + ", its flags held only in memory.");
   s.up = false; s.store = null; s.sel = null; s.via = ""; s.active = null; s.net = "off";
   s.chips = { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" };
-  r.add(C.P ? "The process restarts: memory is wiped, but the persistent store keeps the flags and selector " + selTok(120) + "." : "The process restarts, and the in-memory store and selector are gone.");
-  change(s, C.k);
-  r.add(gapText(C.k, "while the process is down"));
+  r.add(C.P ? "The process restarts: memory is wiped, but the persistent store keeps the flags and selector " + selShort(BASE) + "." : "The process restarts, and the in-memory store and selector are gone.");
+  change(s, C.k, C.D);
+  r.add(gapText(C.k, C.D, "while the process is down"));
   s.up = true;
   if (C.P) {
     s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
-    loaded(s, 120, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
-    r.add("Initializer 1 loads flags and selector " + selTok(120) + " from the persistent store, so the SDK can evaluate at once and skips the polling initializer.");
+    loaded(s, BASE, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
+    r.add("Initializer 1 loads flags and selector " + selShort(BASE) + " from the persistent store, so the SDK can evaluate at once and skips the polling initializer.");
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
-    a = answer(s, 120);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(120), "stream")], down: a.down, dec: a.d });
+    a = answer(s, BASE);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selShort(BASE), "stream")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "streaming connect", BASE)].concat(a.wire) });
   } else {
     s.active = "poll"; s.chips.poll = "done";
     a = answer(s, null);
-    r.add(outcome("The process boots empty, and the polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+    r.add(outcome("The process boots empty, and the polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "polling initializer request", null)].concat(a.wire) });
+    var from = s.sel;
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
-    a = answer(s, s.sel);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
+    a = answer(s, from);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selShort(from), "stream")], down: a.down,
+      wire: [reqWire(s, "streaming connect", from)].concat(a.wire) });
+  }
+  return r.list;
+}
+
+function buildWarm(C) {
+  var base = BASE, V = BASE + C.k, s = newSim(C, V), r = recorder(s), a;
+  if (C.P) { s.disk = base; s.mark = base; s.markEnd = V; s.gapDays = C.D; s.age = C.D; }
+  r.add(C.P ? "A new process starts with nothing in memory, but the persistent store already holds flags and selector " + selShort(base) + ", written " + days(C.D) + " ago by another instance." :
+    "A new process starts with nothing in memory, and with no persistent store configured there is nothing to boot from.");
+  if (C.P) {
+    s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
+    loaded(s, base, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
+    r.add("Initializer 1 loads flags and selector " + selShort(base) + " from the persistent store, so the SDK can evaluate before any network call and skips the polling initializer.");
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, base);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selShort(base), "stream")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "streaming connect", base)].concat(a.wire) });
+  } else {
+    s.active = "poll"; s.chips.poll = "done";
+    a = answer(s, null);
+    r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "polling initializer request", null)].concat(a.wire) });
+    var from = s.sel;
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, from);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selShort(from), "stream")], down: a.down,
+      wire: [reqWire(s, "streaming connect", from)].concat(a.wire) });
   }
   return r.list;
 }
 
 function buildFallback(C) {
-  var s = newSim(C, 120), r = recorder(s), a, from;
-  loaded(s, 120, "full payload");
+  var s = newSim(C, BASE), r = recorder(s), a, from;
+  loaded(s, BASE, "full payload");
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "idle", spoll: "idle" };
-  if (C.P) s.disk = 120;
-  r.add("The polling initializer has loaded the full payload and selector " + selTok(120) + ", and synchronizers take over from here.");
+  if (C.P) s.disk = BASE;
+  r.add("The polling initializer has loaded the full payload and selector " + selShort(BASE) + ", and synchronizers take over from here.");
   s.active = "stream"; s.chips.stream = "failed"; s.net = "broken";
-  r.add("Synchronizer 1, streaming, can’t connect: something on the path blocks long-lived connections.", { up: [req(s, "connect · " + selTok(120), "stream", true)] });
-  change(s, C.k);
-  r.add(gapText(C.k, "while streaming retries"), { up: [req(s, "retry · " + selTok(120), "stream", true)] });
+  r.add("Synchronizer 1, streaming, can’t connect: something on the path blocks long-lived connections.", { up: [req(s, "connect · " + selShort(BASE), "stream", true)],
+    wire: [reqWire(s, "streaming connect", BASE, true)] });
+  change(s, C.k, 0.01);
+  r.add(gapText(C.k, 0, "in the few minutes streaming retries"), { up: [req(s, "retry · " + selShort(BASE), "stream", true)],
+    wire: [reqWire(s, "streaming retry", BASE, true)] });
   s.active = "spoll"; s.chips.stream = "standby"; s.chips.spoll = "active"; s.net = "poll";
-  a = answer(s, 120);
-  r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · " + selTok(120), "poll")], down: a.down, dec: a.d });
-  from = s.sel; change(s, 1);
+  a = answer(s, BASE);
+  r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · " + selShort(BASE), "poll")], down: a.down, dec: a.d,
+    wire: [reqWire(s, "poll request (synchronizer 2)", BASE), "# the poll response carries the same events"].concat(a.wire) });
+  from = s.sel; change(s, 1, 0.01);
   a = answer(s, from);
-  r.add("One more change lands, and the next poll presents selector " + selTok(from) + " and gets only that object.", { up: [req(s, "GET · " + selTok(from), "poll")], down: a.down });
+  r.add("One more change lands, and the next poll presents selector " + selShort(from) + " and gets xfer-changes with just that object.", { up: [req(s, "GET · " + selShort(from), "poll")], down: a.down,
+    wire: [reqWire(s, "next poll", from)].concat(a.wire) });
   return r.list;
 }
 
 function buildFleet(C) {
-  var V = 130, base = V - C.k, s = newSim(C, V, true), r = recorder(s), a;
-  if (C.P) s.disk = base;
-  r.add("A deploy starts " + C.N + " containers at once, each with an empty process" + (C.P ? " and a shared persistent store holding selector " + selTok(base) : "") + ".");
+  var base = BASE, V = BASE + C.k, s = newSim(C, V, true), r = recorder(s), a;
+  if (C.P) { s.disk = base; s.mark = base; s.markEnd = V; s.gapDays = C.D; s.age = C.D; }
+  r.add("A deploy starts " + C.N + " containers at once, each with an empty process" + (C.P ? " and a shared persistent store holding selector " + selShort(base) + ", written " + days(C.D) + " ago" : "") + ".");
   if (C.P) {
     s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped"; s.fleetSt = "cache";
     loaded(s, base, "persistent cache");
-    r.add("Every container’s cache initializer loads flags and selector " + selTok(base) + " from the shared store, with no network transfer.");
+    r.add("Every container’s cache initializer loads flags and selector " + selShort(base) + " from the shared store, with no network transfer.");
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, base); s.fleetSt = a.d.kind;
-    r.add(outcome("Each container’s streaming synchronizer connects", a.d), { up: [req(s, "connect · " + selTok(base), "stream")], down: a.down, dec: a.d });
+    r.add(outcome("Each container’s streaming synchronizer connects", a.d), { up: [req(s, "connect · " + selShort(base), "stream")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "streaming connect", base)].concat(a.wire) });
   } else {
     s.active = "poll"; s.chips.poll = "done";
     a = answer(s, null); s.fleetSt = a.d.kind;
-    r.add(outcome("Each container’s polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+    r.add(outcome("Each container’s polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d,
+      wire: [reqWire(s, "polling initializer request", null)].concat(a.wire) });
   }
-  var other = C.P ? C.N * fullKb(V) : C.N * decide(base, V, RETAIN).kb;
+  var other = C.P ? C.N * fullKb(V) : C.N * decide(base, V, C.D, C.R).kb;
   r.add("Across " + C.N + " containers that is " + kb(s.bytes.total) + " received, versus " + kb(other) + (C.P ? " without" : " with") + " a persistent store.");
   return r.list;
 }
 
 var SCENARIOS = [
   { id: "cold", name: "Cold start", preset: {}, uses: { P: 1 }, build: buildCold },
-  { id: "warm", name: "Cold start, populated store", preset: { k: 8, P: true }, uses: { k: 1, P: 1 }, build: buildWarm },
-  { id: "short", name: "Short gap", preset: { k: 6 }, uses: { k: 1 }, build: buildGap },
-  { id: "long", name: "Long gap", preset: { k: 45 }, uses: { k: 1 }, build: buildGap },
-  { id: "restart", name: "Restart, no persistence", preset: { k: 8, P: false }, uses: { k: 1, P: 1 }, build: buildRestart },
-  { id: "persist", name: "Restart, persistent store", preset: { k: 8, P: true }, uses: { k: 1, P: 1 }, build: buildRestart },
+  { id: "short", name: "Short gap", preset: { k: 6, D: 1 }, uses: { k: 1, D: 1, R: 1 }, build: buildGap },
+  { id: "long", name: "Long gap", preset: { k: 12, D: 10 }, uses: { k: 1, D: 1, R: 1 }, build: buildGap },
+  { id: "nochange", name: "Nothing changed", preset: { D: 3 }, uses: { D: 1, R: 1 }, build: buildNoChange },
+  { id: "restart", name: "Restart, no persistence", preset: { k: 8, D: 1, P: false }, uses: { k: 1, D: 1, R: 1, P: 1 }, build: buildRestart },
+  { id: "persist", name: "Restart, persistent store", preset: { k: 8, D: 1, P: true }, uses: { k: 1, D: 1, R: 1, P: 1 }, build: buildRestart },
+  { id: "warm", name: "Cold start, populated store", preset: { k: 8, D: 2, P: true }, uses: { k: 1, D: 1, R: 1, P: 1 }, build: buildWarm },
   { id: "fallback", name: "Streaming unavailable", preset: { k: 3 }, uses: { k: 1 }, build: buildFallback },
-  { id: "fleet", name: "Fleet deploy", preset: { k: 10, N: 50, P: false }, uses: { k: 1, P: 1, N: 1 }, build: buildFleet }
+  { id: "fleet", name: "Fleet deploy", preset: { k: 10, D: 1, N: 50, P: false }, uses: { k: 1, D: 1, R: 1, P: 1, N: 1 }, build: buildFleet }
 ];
 
 /*==DOM==*/
-if (typeof document === "undefined") { if (typeof module !== "undefined") module.exports = { SCENARIOS: SCENARIOS, decide: decide, storeAt: storeAt, fullKb: fullKb }; return; }
+if (typeof document === "undefined") { if (typeof module !== "undefined") module.exports = { SCENARIOS: SCENARIOS, decide: decide, storeAt: storeAt, fullKb: fullKb, KEYS: KEYS }; return; }
 
 var NS = "http://www.w3.org/2000/svg";
 function el(name, attrs, parent) {
@@ -653,14 +753,12 @@ CHIPS.forEach(function (c) {
   chipEls[c.k] = { g: g, r: r, nm: nm, st: st, tok: c.tok };
 });
 el("line", { x1: 32, x2: 338, y1: 264, y2: 264, "class": "guide" }, gSdk);
-txt(gSdk, 32, 284, "lbl", "Data store");
-txt(gSdk, 32, 306, "lbl", "Selector version");
-txt(gSdk, 32, 328, "lbl", "Selector state · opaque, echoed as-is");
-txt(gSdk, 32, 350, "lbl", "Loaded via");
-var vStore = txt(gSdk, 338, 284, "val", "", "end");
-var vSel = txt(gSdk, 338, 306, "val mono", "", "end");
-var vSelState = txt(gSdk, 338, 328, "val mono", "", "end");
-var vVia = txt(gSdk, 338, 350, "val", "", "end");
+txt(gSdk, 32, 288, "lbl", "Data store");
+txt(gSdk, 32, 314, "lbl", "Selector · opaque, stored as-is");
+txt(gSdk, 32, 340, "lbl", "Loaded via");
+var vStore = txt(gSdk, 338, 288, "val", "", "end");
+var vSel = txt(gSdk, 338, 314, "val mono", "", "end");
+var vVia = txt(gSdk, 338, 340, "val", "", "end");
 var gDisk = el("g", null, gSdk);
 var diskBody = el("path", { d: "M34 370 v26 a14 5 0 0 0 28 0 v-26", "stroke-width": 1.6 }, gDisk);
 var diskTop = el("ellipse", { cx: 48, cy: 370, rx: 14, ry: 5, "stroke-width": 1.6 }, gDisk);
@@ -698,9 +796,9 @@ el("rect", { x: 750, y: 40, width: 354, height: 384, rx: 14, "class": "panel-box
 txt(svg, 754, 26, "lane-h", "Delivery service");
 txt(svg, SX, 68, "sec", "CURRENT SELECTOR");
 var vVer = txt(svg, SX, 98, "bigv", "");
-txt(svg, 1088, 68, "sec", "STATE · OPAQUE", "end");
-var vRet = txt(svg, 1088, 96, "val mono", "", "end");
-txt(svg, SX, 132, "sec", "CHANGE HISTORY · RETAINS LAST " + RETAIN + " · NEWEST LAST");
+txt(svg, 1088, 68, "sec", "DELTA RETENTION", "end");
+var vRet = txt(svg, 1088, 96, "val", "", "end");
+txt(svg, SX, 132, "sec", "CHANGE HISTORY · NEWEST LAST");
 var cells = [];
 for (var ci = 0; ci < LOGN; ci++) {
   var cx = SX + (ci % 16) * 20, cy = 142 + Math.floor(ci / 16) * 20;
@@ -714,10 +812,10 @@ var ring = el("rect", { width: 24, height: 24, rx: 5, fill: "none", "stroke-widt
 ring.style.stroke = "var(--ink)";
 var vSelCap = txt(svg, SX, 246 + 20, "val", "");
 var LEG = [
-  [SX, 292, mix("blue", 30), "Retained"],
-  [SX + 160, 292, "url(#hatch)", "Expired, can’t replay"],
+  [SX, 292, mix("blue", 30), "Within retention"],
+  [SX + 160, 292, "url(#hatch)", "Beyond retention"],
   [SX, 314, col("ok"), "Since SDK selector"],
-  [SX + 160, 314, mix("fail", 65), "Since selector, expired"]
+  [SX + 160, 314, mix("fail", 65), "Since selector, too old"]
 ];
 LEG.forEach(function (l) {
   el("rect", { x: l[0], y: l[1] - 10, width: 12, height: 12, rx: 2 }, svg).style.fill = l[2];
@@ -730,6 +828,7 @@ el("rect", { x: SX + 157, y: 323, width: 18, height: 18, rx: 4, fill: "none", "s
 txt(svg, SX + 178, 336, "leg", "SDK’s selector");
 txt(svg, SX, 380, "sec", "LAST ANSWER");
 var vAns = txt(svg, SX, 408, "bigv", "");
+var vReason = txt(svg, 1088, 408, "val mono", "", "end");
 
 var CHIPST = {
   na: "not configured", idle: "waiting", active: "running", empty: "ran · found nothing", done: "yielded a payload",
@@ -738,6 +837,13 @@ var CHIPST = {
 function fitText(t, max) {
   t.removeAttribute("textLength");
   if (t.getComputedTextLength && t.getComputedTextLength() > max) { t.setAttribute("textLength", max); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+}
+/* Illustrative change ages in days: changes during a gap spread across it; older history is spaced evenly. */
+function cellAge(s, v) {
+  if (s.mark == null) return (s.V - v) * DAYS_PER_CHANGE;
+  if (v > s.markEnd) return 0;
+  if (v > s.mark) return s.gapDays * (s.markEnd - v + 0.5) / Math.max(1, s.markEnd - s.mark);
+  return s.gapDays + (s.mark - v) * DAYS_PER_CHANGE;
 }
 function drawLanes(s, animate) {
   gStack.style.display = s.fleet ? "" : "none";
@@ -755,14 +861,13 @@ function drawLanes(s, animate) {
   var n = s.store ? Object.keys(s.store).length : 0;
   vStore.textContent = s.store ? n + " flags" + (s.fleet ? " each" : "") : "empty";
   vStore.style.fill = s.store ? "" : "var(--ink2)";
-  vSel.textContent = selVer(s.sel);
-  vSelState.textContent = selState(s.sel);
-  vSel.style.fill = vSelState.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
+  vSel.textContent = selShort(s.sel);
+  vSel.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
   vVia.textContent = s.via || "—";
   gDisk.style.display = s.P ? "" : "none";
   diskBody.style.fill = diskTop.style.fill = s.P && s.disk != null ? mix("init", 30) : "var(--surface)";
   diskBody.style.stroke = diskTop.style.stroke = s.P ? col("init") : "var(--line)";
-  vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector " + selTok(s.disk);
+  vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector " + selShort(s.disk);
   fitText(vDisk, 266);
   gDown.style.display = s.up ? "none" : "";
 
@@ -777,14 +882,14 @@ function drawLanes(s, animate) {
   vBytes.textContent = kb(s.bytes.total);
   vBytesStep.textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "";
 
-  vVer.textContent = selVer(s.V);
-  vRet.textContent = selState(s.V);
+  vVer.textContent = selShort(s.V);
+  vRet.textContent = days(s.R);
   cells.forEach(function (c, i) {
     var v = s.V - (LOGN - 1) + i;
     if (v < 1) { c.g.style.display = "none"; return; }
     c.g.style.display = "";
-    var kept = v > s.V - s.H, since = s.sel != null && v > s.sel;
-    c.r.style.fill = since ? (kept ? col("ok") : mix("fail", 65)) : kept ? mix("blue", 30) : "url(#hatch)";
+    var kept = cellAge(s, v) <= s.R, since = s.sel != null && v > s.sel;
+    c.r.style.fill = since ? (s.age <= s.R ? col("ok") : mix("fail", 65)) : kept ? mix("blue", 30) : "url(#hatch)";
     c.d.style.display = isDel(v) ? "" : "none";
     c.r.classList.remove("fresh"); c.d.classList.remove("fresh");
     var fi = s.fresh.indexOf(v);
@@ -803,13 +908,15 @@ function drawLanes(s, animate) {
   else if (s.sel == null) cap = "SDK has no selector";
   else {
     var gap = s.V - s.sel;
-    cap = "SDK selector version " + selVer(s.sel) + " · " + (gap === 0 ? "current" : gap + " " + pl(gap, "change") + " missed" + (gap > s.H ? ", expired" : ""));
+    cap = "SDK selector " + selShort(s.sel) + " · " + (gap === 0 ? "current" : gap + " " + pl(gap, "change") + " missed" + (s.age > s.R ? ", too old" : ""));
   }
   vSelCap.textContent = cap;
   fitText(vSelCap, 322);
-  vSelCap.style.fill = s.sel != null && s.V - s.sel > s.H ? col("fail") : "";
-  if (s.last) { vAns.textContent = { full: "xfer-full", changes: "xfer-changes", none: "none" }[s.last.d.kind]; vAns.style.fill = col(KTOK[s.last.d.kind]); }
-  else { vAns.textContent = "—"; vAns.style.fill = "var(--ink2)"; }
+  vSelCap.style.fill = s.sel != null && s.V > s.sel && s.age > s.R ? col("fail") : "";
+  if (s.last) {
+    vAns.textContent = s.last.d.kind === "update" ? "partial update" : INTENT[s.last.d.kind]; vAns.style.fill = col(KTOK[s.last.d.kind]);
+    vReason.textContent = s.last.d.reason || (s.last.d.kind === "update" ? "no server-intent" : "");
+  } else { vAns.textContent = "—"; vAns.style.fill = "var(--ink2)"; vReason.textContent = ""; }
 }
 
 /* ============ packets ============ */
@@ -872,38 +979,33 @@ function drawInspector(s) {
   }
   var ACT = { cache: "Initializer 1 · Persistent cache", poll: "Initializer 2 · Polling", stream: "Synchronizer 1 · Streaming", spoll: "Synchronizer 2 · Polling" };
   var kv = [
-    ["Selector version", selVer(s.sel), true],
-    ["Selector state", selState(s.sel), true],
+    ["Selector", selFull(s.sel), s.sel != null],
+    ["Selector age", !s.up || s.sel == null ? "—" : s.age ? days(s.age) : "current"],
     ["Changes missed", !s.up || s.sel == null ? "—" : String(s.V - s.sel)],
     ["Active", !s.up ? "process stopped" : s.active ? ACT[s.active] : "nothing yet"],
     ["Loaded via", s.via || "—"]
   ];
-  if (s.P) kv.push(["Persistent store", s.disk == null ? "empty" : selTok(s.disk), s.disk != null]);
+  if (s.P) kv.push(["Persistent store", s.disk == null ? "empty" : selFull(s.disk), s.disk != null]);
   $("iKv").innerHTML = "";
   kv.forEach(function (r) {
     var dt = document.createElement("dt"), dd = document.createElement("dd");
     dt.textContent = r[0]; dd.textContent = r[1]; if (r[2]) dd.className = "mono";
     $("iKv").appendChild(dt); $("iKv").appendChild(dd);
   });
-  var ev = $("iEv"); ev.innerHTML = "";
   if (s.last) {
-    $("iWhy").textContent = explain(s.last.d);
-    s.last.ev.forEach(function (e) {
-      var li = document.createElement("li");
-      li.innerHTML = '<span class="e"></span><span class="d"></span>';
-      li.firstChild.textContent = e[0]; li.lastChild.textContent = e[1];
-      li.firstChild.style.color = col(KTOK[s.last.d.kind]);
-      ev.appendChild(li);
-    });
-  } else $("iWhy").textContent = "No response yet.";
+    var ld = s.last.d;
+    $("iIntent").textContent = ld.kind === "update" ? "Partial update · no server-intent" : "server-intent " + INTENT[ld.kind] + (ld.reason ? " · reason " + ld.reason : "");
+    $("iIntent").style.color = col(KTOK[ld.kind]);
+    $("iWhy").textContent = explain(ld);
+  } else { $("iIntent").textContent = "No response yet."; $("iIntent").style.color = ""; $("iWhy").textContent = ""; }
   $("iTotal").textContent = kb(s.bytes.total);
   $("iStep").textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "nothing received this step";
   var bars;
   if (s.fleet) {
-    var V = s.V, base = V - C.k;
+    var V = s.V, wd = decide(BASE, V, C.D, C.R);
     bars = [
       ["Without persistent store", C.N * fullKb(V), "full", !C.P],
-      ["With persistent store", C.N * decide(base, V, RETAIN).kb, KTOK[decide(base, V, RETAIN).kind], C.P]
+      ["With persistent store", C.N * wd.kb, KTOK[wd.kind], C.P]
     ];
   } else {
     bars = [["Full payload now", fullKb(s.V), "full", s.last && s.last.d.kind === "full"]];
@@ -922,7 +1024,7 @@ function drawInspector(s) {
 }
 
 /* ============ runner ============ */
-var C = { k: 6, P: false, N: 50 };
+var C = { k: 6, D: 1, R: 7, P: false, N: 50 };
 var cur = { sc: 0, i: 0, steps: [], dec: -1, playing: false, pred: null, arrived: true, timer: 0, raf: 0 };
 
 function rebuild() {
@@ -935,6 +1037,20 @@ function rebuild() {
 function stopAnim() { cancelAnimationFrame(cur.raf); gPk.textContent = ""; }
 function stopPlay() { cur.playing = false; clearTimeout(cur.timer); }
 function draw(s, animate) { drawLanes(s, animate); drawInspector(s); }
+function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function drawWire(st) {
+  var tokOf = { "server-intent": "blue", "put-object": "ok", "delete-object": "fail", "payload-transferred": "stream" };
+  $("wireMeta").textContent = st.wire.length ? "Exact events for this step" : "";
+  if (!st.wire.length) { $("wire").innerHTML = '<span class="c"># no network traffic in this step</span>'; return; }
+  $("wire").innerHTML = st.wire.map(function (block) {
+    return block.split("\n").map(function (line) {
+      if (line.charAt(0) === "#") return '<span class="c">' + esc(line) + "</span>";
+      var m = /^event: (.*)$/.exec(line);
+      if (m) return '<span class="ev" style="color:var(--' + (tokOf[m[1]] || "ink") + ')">' + esc(line) + "</span>";
+      return esc(line);
+    }).join("\n");
+  }).join('<span class="gap"></span>');
+}
 function needsPrediction() { return $("predictOn").checked && !cur.pred && cur.dec >= 0 && cur.i < cur.dec; }
 
 function enter(i) {
@@ -990,6 +1106,7 @@ function panel() {
     b.disabled = block && k > cur.i;
   });
   $("narr").textContent = st.text;
+  drawWire(st);
   $("prev").disabled = cur.i === 0;
   $("next").disabled = cur.i >= n - 1 || block;
   $("play").textContent = cur.playing ? "Pause" : cur.i >= n - 1 ? "Replay" : "Play";
@@ -998,8 +1115,8 @@ function panel() {
   pr.hidden = !block;
   if (block) {
     var d = cur.steps[cur.dec].dec;
-    $("predictCtx").textContent = "At step " + (cur.dec + 1) + " the SDK presents " + (d.sel == null ? "no selector" : "selector " + selTok(d.sel) + ", having missed " + d.gap + " " + pl(d.gap, "change")) +
-      ". The service retains its last " + d.H + " " + pl(d.H, "change") + ".";
+    $("predictCtx").textContent = "At step " + (cur.dec + 1) + " the SDK presents " +
+      (d.sel == null ? "no selector." : "selector " + selShort(d.sel) + ", " + days(d.age) + " old, after " + d.gap + " " + pl(d.gap, "change") + ". Server delta retention is " + days(d.R) + ".");
   }
   var vd = $("verdict"), show = cur.pred && cur.dec >= 0 && (cur.i > cur.dec || (cur.i === cur.dec && cur.arrived));
   vd.hidden = !show;
@@ -1008,17 +1125,18 @@ function panel() {
     vd.style.borderColor = col(ok ? "ok" : "fail");
     vd.style.background = mix(ok ? "ok" : "fail", 8);
     vd.innerHTML = "<b></b><span></span>";
-    vd.firstChild.textContent = ok ? "Correct: " + KIND[dd.kind].toLowerCase() + "." : "Not this time: you said " + KIND[cur.pred].toLowerCase() + ", the answer is " + KIND[dd.kind].toLowerCase() + ".";
+    var sent = "server-intent " + INTENT[dd.kind] + (dd.reason ? " (" + dd.reason + ")" : "");
+    vd.firstChild.textContent = ok ? "Correct: " + KIND[dd.kind].toLowerCase() + ". The server sent " + sent + "." : "Not this time: you said " + KIND[cur.pred].toLowerCase() + "; the server sent " + sent + ".";
     vd.lastChild.textContent = explain(dd);
   }
 }
 
 /* ============ controls ============ */
 function syncControls() {
-  $("k").value = C.k; $("p").checked = C.P; $("n").value = C.N;
-  $("kOut").textContent = C.k;
+  $("k").value = C.k; $("d").value = C.D; $("r").value = C.R; $("p").checked = C.P; $("n").value = C.N;
+  $("kOut").textContent = C.k; $("dOut").textContent = days(C.D); $("rOut").textContent = days(C.R);
   var u = SCENARIOS[cur.sc].uses;
-  [["cK", "k", "k"], ["cP", "P", "p"], ["cN", "N", "n"]].forEach(function (c) {
+  [["cK", "k", "k"], ["cD", "D", "d"], ["cR", "R", "r"], ["cP", "P", "p"], ["cN", "N", "n"]].forEach(function (c) {
     var on = !!u[c[1]];
     $(c[0]).classList.toggle("off", !on);
     $(c[2]).disabled = !on;
@@ -1035,7 +1153,7 @@ function selectScenario(idx) {
   try { history.replaceState(null, "", "#" + SCENARIOS[idx].id); } catch (e) {}
 }
 function onControl() {
-  C.k = +$("k").value; C.P = $("p").checked;
+  C.k = +$("k").value; C.D = +$("d").value; C.R = +$("r").value; C.P = $("p").checked;
   C.N = Math.max(2, Math.min(500, Math.round(+$("n").value) || 50));
   syncControls();
   if (cur.i < cur.dec) cur.pred = null;
@@ -1053,7 +1171,7 @@ $("tabs").addEventListener("keydown", function (e) {
   var k = (cur.sc + (e.key === "ArrowRight" ? 1 : SCENARIOS.length - 1)) % SCENARIOS.length;
   selectScenario(k); $("tabs").children[k].focus();
 });
-$("k").addEventListener("input", onControl);
+["k", "d", "r"].forEach(function (id) { $(id).addEventListener("input", onControl); });
 $("p").addEventListener("change", onControl);
 $("n").addEventListener("change", onControl);
 $("prev").addEventListener("click", function () { if (cur.i > 0) jump(cur.i - 1); });
