@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How FDv2 SDK initialization works</title>
+<style>
+:root {
+  box-sizing: border-box;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --bg: #eef2f7;
+  --surface: #ffffff;
+  --surface2: #e5ebf3;
+  --ink: #0f1a2c;
+  --ink2: #4a5870;
+  --line: #c4cfde;
+  --stream: #0c9686;
+  --poll: #b7791f;
+  --init: #7556d1;
+  --fail: #d03f3f;
+  --ok: #1b9150;
+  --full: #d4630b;
+  --none: #6b7a93;
+  --blue: #2c6bd0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1220;
+    --surface: #131c30;
+    --surface2: #1b2742;
+    --ink: #e8eef9;
+    --ink2: #9aa9c6;
+    --line: #2d3c5e;
+    --stream: #2dd4bf;
+    --poll: #fbbf24;
+    --init: #a78bfa;
+    --fail: #f87171;
+    --ok: #4ade80;
+    --full: #fb923c;
+    --none: #94a3b8;
+    --blue: #60a5fa;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --surface: #131c30;
+  --surface2: #1b2742;
+  --ink: #e8eef9;
+  --ink2: #9aa9c6;
+  --line: #2d3c5e;
+  --stream: #2dd4bf;
+  --poll: #fbbf24;
+  --init: #a78bfa;
+  --fail: #f87171;
+  --ok: #4ade80;
+  --full: #fb923c;
+  --none: #94a3b8;
+  --blue: #60a5fa;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.app { max-width: 1240px; margin: 0 auto; padding: 22px 20px 40px; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+h1 { font-size: clamp(22px, 3.2vw, 30px); font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+.sub { margin: 0 0 18px; color: var(--ink2); font-size: 15px; }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+button.btn {
+  appearance: none; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface2); color: var(--ink);
+  padding: 8px 16px; border-radius: 10px;
+}
+button.btn:hover:not(:disabled) { border-color: var(--ink2); }
+button.btn:disabled { opacity: 0.4; cursor: default; }
+button.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+button.btn.small { font-size: 13px; padding: 6px 12px; white-space: nowrap; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tab {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink2);
+  font: inherit; font-size: 14px; font-weight: 600; padding: 7px 13px; border-radius: 999px; cursor: pointer;
+}
+.tab b { color: var(--ink2); font-weight: 700; margin-right: 4px; }
+.tab[aria-selected="true"] { color: var(--ink); border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.tab:hover { color: var(--ink); }
+
+.controls {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px 24px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-bottom: 12px;
+}
+.ctl label { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 14px; }
+.ctl label output { font-variant-numeric: tabular-nums; color: var(--blue); }
+.ctl input[type="range"] { width: 100%; accent-color: var(--blue); }
+.ctl small { display: block; color: var(--ink2); font-size: 12.5px; }
+.ctl.off { opacity: 0.4; }
+.ctl .row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.ctl input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
+.ctl input[type="number"] {
+  width: 90px; font: inherit; font-size: 14px; color: var(--ink); background: var(--surface2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px;
+}
+
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+.scroller { overflow-x: auto; }
+.scroller svg { min-width: 760px; }
+svg { display: block; width: 100%; height: auto; font-family: var(--sans); }
+svg text { fill: var(--ink); }
+.panel-box { fill: color-mix(in srgb, var(--surface2) 50%, var(--surface)); stroke: var(--line); stroke-width: 1.5; }
+.net-box { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 6; }
+.lane-h { font-size: 15px; font-weight: 700; }
+.lane-s { font-size: 12px; fill: var(--ink2) !important; }
+.sec { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; fill: var(--ink2) !important; }
+.lbl { font-size: 13px; fill: var(--ink2) !important; }
+.val { font-size: 13.5px; font-weight: 700; }
+.mono { font-family: var(--mono); }
+.chip rect { stroke-width: 1.6; }
+.chip .n { font-size: 12px; font-weight: 700; fill: var(--ink2) !important; }
+.chip .nm { font-size: 13px; font-weight: 700; }
+.chip .st { font-size: 11.5px; fill: var(--ink2) !important; }
+.bigv { font-size: 26px; font-weight: 700; font-family: var(--mono); }
+.guide { stroke: var(--line); stroke-width: 1.5; }
+.pkt rect { stroke-width: 1.6; }
+.pkt text { font-size: 12px; font-weight: 700; font-family: var(--mono); }
+.cell { stroke: var(--surface); stroke-width: 0.5; }
+.cell.fresh { animation: pop 0.45s ease both; transform-box: fill-box; transform-origin: center; }
+@keyframes pop { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+.leg { font-size: 11.5px; fill: var(--ink2) !important; }
+
+.steps {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 20px; margin-bottom: 12px;
+}
+.steps-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.meta { color: var(--ink2); font-size: 14px; font-weight: 600; }
+.dots { display: flex; flex-wrap: wrap; gap: 6px; }
+.dot { appearance: none; width: 26px; height: 8px; border-radius: 4px; border: 0; padding: 0; cursor: pointer; background: var(--line); }
+.dot.past { background: var(--ink2); }
+.dot.dec { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--blue); }
+.dot[aria-current="true"] { background: var(--blue); }
+.dot:disabled { cursor: default; }
+.narr { font-size: clamp(17px, 1.8vw, 20px); line-height: 1.45; margin: 0 0 12px; min-height: 2.9em; max-width: 90ch; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.spacer { flex: 1 1 auto; }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--ink2); }
+.toggle input { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
+
+.predict, .verdict { border-radius: 12px; padding: 14px 16px; margin: 0 0 12px; }
+.predict { border: 1.5px solid var(--blue); background: color-mix(in srgb, var(--blue) 7%, var(--surface)); }
+.predict p { margin: 0 0 4px; }
+.predict .q { font-weight: 700; font-size: 16.5px; }
+.predict .ctx { color: var(--ink2); font-size: 14.5px; margin-bottom: 10px; }
+.predict .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.verdict { border: 1.5px solid; font-size: 15px; }
+.verdict b { display: block; font-size: 16px; margin-bottom: 2px; }
+[hidden] { display: none !important; }
+
+.inspector { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 640px) { .inspector { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .inspector { grid-template-columns: repeat(4, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.card h3 { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink2); }
+.sum { margin: 0 0 10px; font-weight: 700; font-size: 15px; }
+.fgrid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; max-width: 300px; }
+.fgrid.fleet { grid-template-columns: repeat(20, 1fr); }
+.fc { aspect-ratio: 1; border-radius: 3px; background: color-mix(in srgb, var(--blue) 45%, var(--surface)); }
+.fc.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); }
+.fc.upd { background: var(--ok); }
+.fc.rem { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fail); }
+.fc.k-empty { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); }
+.fc.k-cache { background: var(--init); }
+.fc.k-full { background: var(--full); }
+.fc.k-changes { background: var(--ok); }
+.fc.k-none { background: var(--none); }
+.key { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 12.5px; color: var(--ink2); }
+.key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+.kv dt { color: var(--ink2); }
+.kv dd { margin: 0; font-weight: 600; }
+.kv .mono { font-family: var(--mono); }
+.why { margin: 0 0 8px; font-size: 14px; color: var(--ink2); }
+.events { margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12.5px; }
+.events li { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.events li:last-child { border-bottom: 0; }
+.events .e { font-weight: 700; min-width: 15ch; }
+.events .d { color: var(--ink2); }
+.big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stepkb { color: var(--ink2); font-size: 14px; margin-bottom: 10px; }
+.bar { margin-top: 8px; }
+.bar .bl { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.bar .bl b { font-variant-numeric: tabular-nums; }
+.bar .bt { height: 10px; border-radius: 5px; background: var(--surface2); overflow: hidden; margin-top: 3px; }
+.bar .bf { height: 100%; border-radius: 5px; transition: width 0.4s ease; min-width: 3px; }
+.bar.cur .bl span { color: var(--ink); font-weight: 700; }
+.muted { color: var(--ink2); font-size: 14px; margin: 0; }
+
+footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch; }
+@media (prefers-reduced-motion: reduce) {
+  .cell.fresh { animation: none; }
+  .bar .bf { transition: none; }
+}
+@media (max-width: 640px) {
+  .app { padding: 16px 16px 30px; }
+  .steps { padding: 14px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>How FDv2 SDK initialization works</h1>
+      <p class="sub">Initializers, synchronizers, and the selector: how an SDK gets its first payload and stays current.</p>
+    </div>
+    <button class="btn small" id="theme" type="button">Theme: auto</button>
+  </div>
+
+  <div class="tabs" id="tabs" role="tablist" aria-label="Scenarios"></div>
+
+  <section class="controls" aria-label="Simulation controls">
+    <div class="ctl" id="cK">
+      <label for="k">Changes while disconnected <output id="kOut"></output></label>
+      <input type="range" id="k" min="0" max="60" step="1">
+      <small>Flag changes on the service after the SDK’s selector was issued.</small>
+    </div>
+    <div class="ctl" id="cH">
+      <label for="h">Server’s retained history <output id="hOut"></output></label>
+      <input type="range" id="h" min="0" max="50" step="1">
+      <small>How many recent changes the service can still replay as a delta.</small>
+    </div>
+    <div class="ctl" id="cP">
+      <label for="p">Persistent store</label>
+      <div class="row"><input type="checkbox" id="p"><small>Keeps flags and the selector across restarts.</small></div>
+    </div>
+    <div class="ctl" id="cN">
+      <label for="n">Fleet size</label>
+      <div class="row"><input type="number" id="n" min="2" max="500" step="1"><small>Containers deploying at once.</small></div>
+    </div>
+  </section>
+
+  <section class="stage">
+    <div class="scroller">
+      <svg id="lanes" viewBox="0 0 1120 440" role="img" aria-label="SDK, network, and delivery service lanes"></svg>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="steps-top">
+      <span class="meta" id="meta"></span>
+      <div class="dots" id="dots" role="group" aria-label="Steps"></div>
+    </div>
+    <div class="predict" id="predict" hidden>
+      <p class="q">Predict first: what will the server send?</p>
+      <p class="ctx" id="predictCtx"></p>
+      <div class="choices">
+        <button class="btn" type="button" data-guess="full">Full payload</button>
+        <button class="btn" type="button" data-guess="changes">Delta</button>
+        <button class="btn" type="button" data-guess="none">Nothing</button>
+      </div>
+    </div>
+    <div class="verdict" id="verdict" hidden></div>
+    <p class="narr" id="narr" aria-live="polite"></p>
+    <div class="actions">
+      <button class="btn" id="prev" type="button">Prev</button>
+      <button class="btn primary" id="next" type="button">Next</button>
+      <button class="btn" id="play" type="button">Play</button>
+      <button class="btn" id="reset" type="button">Reset</button>
+      <span class="spacer"></span>
+      <label class="toggle"><input type="checkbox" id="predictOn"> Predict first</label>
+    </div>
+  </section>
+
+  <section class="inspector" aria-label="SDK state inspector">
+    <div class="card">
+      <h3>Data store</h3>
+      <p class="sum" id="iSum"></p>
+      <div class="fgrid" id="iGrid"></div>
+      <div class="key" id="iKey"></div>
+    </div>
+    <div class="card">
+      <h3>SDK state</h3>
+      <dl class="kv" id="iKv"></dl>
+    </div>
+    <div class="card">
+      <h3>Last response</h3>
+      <p class="why" id="iWhy"></p>
+      <ol class="events" id="iEv"></ol>
+    </div>
+    <div class="card">
+      <h3>Bytes received</h3>
+      <div class="big" id="iTotal"></div>
+      <div class="stepkb" id="iStep"></div>
+      <div id="iBars"></div>
+    </div>
+  </section>
+
+  <footer>
+    Teaching model. Flag counts, payload sizes, and retention measured in changes are illustrative; this is not LaunchDarkly’s actual retention implementation or wire format sizes. Tip: add #cold, #short, #long, #restart, #persist, #fallback, or #fleet to the link to open a scenario.
+  </footer>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+/* ============ teaching model (pure) ============ */
+var NF = 48, PUT = 1.5, DEL = 0.1, META = 0.2, NONE = 0.05, LOGN = 64;
+
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function pl(n, w) { return n === 1 ? w : w + "s"; }
+function flagOf(v) { return (v * 17) % NF; }
+function isDel(v) { return v % 13 === 0; }
+function fname(f) { return "flag-" + (f < 10 ? "0" : "") + f; }
+function kb(n) { return n >= 1000 ? (n / 1000).toFixed(2) + " MB" : (n < 100 ? n.toFixed(1) : Math.round(n)) + " KB"; }
+
+/* Server state at version V: every flag starts at v0, then each change v puts or deletes flagOf(v). */
+function storeAt(V) {
+  var st = {}, f, v;
+  for (f = 0; f < NF; f++) st[f] = 0;
+  for (v = 1; v <= V; v++) { if (isDel(v)) delete st[flagOf(v)]; else st[flagOf(v)] = v; }
+  return st;
+}
+function changesSince(s, V) {
+  var m = {}, v;
+  for (v = s + 1; v <= V; v++) m[flagOf(v)] = { f: flagOf(v), v: v, del: isDel(v) };
+  return Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return a.f - b.f; });
+}
+function fullKb(V) { return Object.keys(storeAt(V)).length * PUT + META; }
+
+/* The selector decides the answer: none, a delta from retained history, or a full payload. */
+function decide(sel, V, H) {
+  var d = { sel: sel, V: V, H: H, gap: sel == null ? null : V - sel };
+  if (sel == null) d.kind = "full";
+  else if (sel >= V) d.kind = "none";
+  else if (V - sel <= H) d.kind = "changes";
+  else d.kind = "full";
+  if (d.kind === "full") { d.n = Object.keys(storeAt(V)).length; d.kb = d.n * PUT + META; }
+  else if (d.kind === "changes") {
+    d.list = changesSince(sel, V);
+    d.dels = d.list.filter(function (c) { return c.del; }).length;
+    d.puts = d.list.length - d.dels; d.n = d.list.length;
+    d.kb = d.puts * PUT + d.dels * DEL + META;
+  } else { d.n = 0; d.kb = NONE; }
+  return d;
+}
+var KIND = { full: "Full payload", changes: "Delta", none: "Nothing" };
+var KTOK = { full: "full", changes: "ok", none: "none" };
+
+function explain(d) {
+  if (d.sel == null) return "No selector means no basis for a delta, so the server sends every flag.";
+  if (d.kind === "none") return "The selector matches the service’s current version, so there is nothing to send.";
+  if (d.kind === "changes") return "The selector is " + d.gap + " " + pl(d.gap, "change") + " behind and the service retains " + d.H + ", so it sends only the " + d.n + " changed " + pl(d.n, "object") + ".";
+  return "The selector is " + d.gap + " changes behind but the service retains only " + d.H + ", so it can’t build a delta and sends every flag.";
+}
+function outcome(lead, d) {
+  var w = lead + " with " + (d.sel == null ? "no selector" : "selector v" + d.sel);
+  if (d.kind === "none") return w + " and gets server-intent none: it is already current.";
+  if (d.kind === "changes") return w + " and gets a delta of " + d.n + " " + pl(d.n, "object") + ", ending in selector v" + d.V + ".";
+  if (d.sel == null) return w + " and gets the full payload of " + d.n + " flags, ending in selector v" + d.V + ".";
+  return w + ", which predates the retained history, so it gets the full payload instead of a delta.";
+}
+
+function newSim(C, V, fleet) {
+  return {
+    V: V, H: C.H, P: C.P, fleet: fleet ? C.N : 0, up: true, store: null, sel: null, via: "", active: null,
+    chips: { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" },
+    disk: null, net: "off", fresh: [], updated: [], removed: [], bytes: { step: 0, total: 0 }, last: null, fleetSt: "empty"
+  };
+}
+function recorder(s) {
+  var list = [];
+  return {
+    list: list,
+    add: function (text, o) {
+      o = o || {};
+      list.push({ text: text, up: o.up || [], down: o.down || [], dec: o.dec || null, after: clone(s) });
+      s.fresh = []; s.updated = []; s.removed = []; s.bytes.step = 0;
+    }
+  };
+}
+function change(s, n) { for (var i = 0; i < n; i++) { s.V++; s.fresh.push(s.V); } }
+function loaded(s, V, via) { s.store = storeAt(V); s.sel = V; s.via = via; }
+function pre(s) { return s.fleet ? "×" + s.fleet + " " : ""; }
+function req(s, t, tok, fail) { return { t: pre(s) + t, tok: tok, fail: !!fail }; }
+function gapText(k, when) {
+  return k ? k + " flag " + pl(k, "change") + " " + (k === 1 ? "lands" : "land") + " on the service " + when + "." : "Nothing changes on the service " + when + ".";
+}
+
+/* The server answers a connect or poll: put/delete objects, then payload-transferred with the new selector. */
+function answer(s, sel) {
+  var d = decide(sel, s.V, s.H), mult = s.fleet || 1, down = [], ev = [], prev = s.store || {};
+  if (d.kind === "full") {
+    var live = storeAt(s.V), keys = Object.keys(live);
+    s.store = live;
+    s.updated = keys.map(Number);
+    s.removed = Object.keys(prev).filter(function (k) { return !(k in live); }).map(Number);
+    down = [["server-intent · xfer-full", "full"], ["put-object × " + keys.length, "full"], ["payload-transferred · v" + s.V, "full"]];
+    ev.push(["server-intent", "xfer-full"]);
+    keys.slice(0, 3).forEach(function (k) { ev.push(["put-object", fname(+k) + "  v" + live[k]]); });
+    ev.push(["…", (keys.length - 3) + " more put-object"]);
+    s.via = "full payload";
+  } else if (d.kind === "changes") {
+    var st = clone(prev);
+    s.updated = []; s.removed = [];
+    d.list.forEach(function (c) { if (c.del) { delete st[c.f]; s.removed.push(c.f); } else { st[c.f] = c.v; s.updated.push(c.f); } });
+    s.store = st;
+    down = [["server-intent · xfer-changes", "ok"]];
+    if (d.puts) down.push(["put-object × " + d.puts, "ok"]);
+    if (d.dels) down.push(["delete-object × " + d.dels, "ok"]);
+    ev.push(["server-intent", "xfer-changes"]);
+    d.list.slice(0, 5).forEach(function (c) { ev.push([c.del ? "delete-object" : "put-object", fname(c.f) + "  v" + c.v]); });
+    if (d.list.length > 5) ev.push(["…", (d.list.length - 5) + " more"]);
+    s.via = "delta";
+  } else {
+    down = [["server-intent · none", "none"]];
+    ev.push(["server-intent", "none"]);
+  }
+  if (d.kind !== "none") { down.push(["payload-transferred · v" + s.V, KTOK[d.kind]]); ev.push(["payload-transferred", "selector v" + s.V]); }
+  s.sel = s.V;
+  s.bytes.step += d.kb * mult; s.bytes.total += d.kb * mult;
+  delete d.list;
+  s.last = { d: d, ev: ev };
+  if (s.P && !s.fleet) s.disk = s.sel;
+  return { d: d, down: down.map(function (x) { return { t: pre(s) + x[0], tok: x[1] }; }) };
+}
+
+/* ============ scenarios ============ */
+function buildCold(C) {
+  var s = newSim(C, 120), r = recorder(s), a;
+  r.add("The process starts with an empty data store and no selector.");
+  if (C.P) {
+    s.active = "cache"; s.chips.cache = "empty";
+    r.add("Initializer 1 reads the persistent store and finds nothing, since this is the first boot.");
+  }
+  s.active = "poll"; s.chips.poll = "done";
+  a = answer(s, null);
+  r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+  s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+  a = answer(s, s.sel);
+  r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+  change(s, 1);
+  a = answer(s, s.sel);
+  r.add(a.d.kind === "changes" ? "A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector v" + s.V + "." :
+    "A flag changes, but with no retained history the service can only resend the full payload down the stream.", { down: a.down });
+  return r.list;
+}
+
+function buildGap(C) {
+  var s = newSim(C, 120), r = recorder(s), a;
+  loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
+  s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
+  if (C.P) s.disk = 120;
+  r.add("The SDK is streaming at selector v120 with every flag in memory.");
+  s.net = "broken"; s.chips.stream = "retry";
+  r.add("The stream drops, and the SDK keeps evaluating from its in-memory store while it retries.");
+  change(s, C.k);
+  r.add(gapText(C.k, "while the SDK is disconnected"));
+  s.net = "stream"; s.chips.stream = "active";
+  a = answer(s, 120);
+  r.add(outcome("The stream reconnects", a.d), { up: [req(s, "connect · v120", "stream")], down: a.down, dec: a.d });
+  return r.list;
+}
+
+function buildRestart(C) {
+  var s = newSim(C, 120), r = recorder(s), a;
+  loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
+  s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
+  if (C.P) s.disk = 120;
+  r.add(C.P ? "The SDK is streaming at v120 and mirroring its data to a persistent store." : "The SDK is streaming at v120 with its flags held only in memory.");
+  s.up = false; s.store = null; s.sel = null; s.via = ""; s.active = null; s.net = "off";
+  s.chips = { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" };
+  r.add(C.P ? "The process restarts: memory is wiped, but the persistent store keeps the flags and selector v120." : "The process restarts, and the in-memory store and selector are gone.");
+  change(s, C.k);
+  r.add(gapText(C.k, "while the process is down"));
+  s.up = true;
+  if (C.P) {
+    s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
+    loaded(s, 120, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
+    r.add("Initializer 1 loads flags and selector v120 from the persistent store, so the SDK can evaluate at once and skips the polling initializer.");
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, 120);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v120", "stream")], down: a.down, dec: a.d });
+  } else {
+    s.active = "poll"; s.chips.poll = "done";
+    a = answer(s, null);
+    r.add(outcome("The process boots empty, and the polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, s.sel);
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+  }
+  return r.list;
+}
+
+function buildFallback(C) {
+  var s = newSim(C, 120), r = recorder(s), a, from;
+  loaded(s, 120, "full payload");
+  s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "idle", spoll: "idle" };
+  if (C.P) s.disk = 120;
+  r.add("The polling initializer has loaded the full payload at v120, and synchronizers take over from here.");
+  s.active = "stream"; s.chips.stream = "failed"; s.net = "broken";
+  r.add("Synchronizer 1, streaming, can’t connect: something on the path blocks long-lived connections.", { up: [req(s, "connect · v120", "stream", true)] });
+  change(s, C.k);
+  r.add(gapText(C.k, "while streaming retries"), { up: [req(s, "retry · v120", "stream", true)] });
+  s.active = "spoll"; s.chips.stream = "standby"; s.chips.spoll = "active"; s.net = "poll";
+  a = answer(s, 120);
+  r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · v120", "poll")], down: a.down, dec: a.d });
+  from = s.sel; change(s, 1);
+  a = answer(s, from);
+  r.add(a.d.kind === "changes" ? "One more change lands, and the next poll presents selector v" + from + " and gets only that object." :
+    "One more change lands, and with no retained history the next poll gets the full payload again.", { up: [req(s, "GET · v" + from, "poll")], down: a.down });
+  return r.list;
+}
+
+function buildFleet(C) {
+  var V = 130, base = V - C.k, s = newSim(C, V, true), r = recorder(s), a;
+  if (C.P) s.disk = base;
+  r.add("A deploy starts " + C.N + " containers at once, each with an empty process" + (C.P ? " and a shared persistent store at v" + base : "") + ".");
+  if (C.P) {
+    s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped"; s.fleetSt = "cache";
+    loaded(s, base, "persistent cache");
+    r.add("Every container’s cache initializer loads flags and selector v" + base + " from the shared store, with no network transfer.");
+    s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
+    a = answer(s, base); s.fleetSt = a.d.kind;
+    r.add(outcome("Each container’s streaming synchronizer connects", a.d), { up: [req(s, "connect · v" + base, "stream")], down: a.down, dec: a.d });
+  } else {
+    s.active = "poll"; s.chips.poll = "done";
+    a = answer(s, null); s.fleetSt = a.d.kind;
+    r.add(outcome("Each container’s polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
+  }
+  var other = C.P ? C.N * fullKb(V) : C.N * decide(base, V, C.H).kb;
+  r.add("Across " + C.N + " containers that is " + kb(s.bytes.total) + " received, versus " + kb(other) + (C.P ? " without" : " with") + " a persistent store.");
+  return r.list;
+}
+
+var SCENARIOS = [
+  { id: "cold", name: "Cold start", preset: {}, uses: { P: 1 }, build: buildCold },
+  { id: "short", name: "Short gap", preset: { k: 6, H: 30 }, uses: { k: 1, H: 1 }, build: buildGap },
+  { id: "long", name: "Long gap", preset: { k: 45, H: 20 }, uses: { k: 1, H: 1 }, build: buildGap },
+  { id: "restart", name: "Restart, no persistence", preset: { k: 8, H: 30, P: false }, uses: { k: 1, H: 1, P: 1 }, build: buildRestart },
+  { id: "persist", name: "Restart, persistent store", preset: { k: 8, H: 30, P: true }, uses: { k: 1, H: 1, P: 1 }, build: buildRestart },
+  { id: "fallback", name: "Streaming unavailable", preset: { k: 3, H: 30 }, uses: { k: 1, H: 1 }, build: buildFallback },
+  { id: "fleet", name: "Fleet deploy", preset: { k: 10, H: 30, N: 50, P: false }, uses: { k: 1, H: 1, P: 1, N: 1 }, build: buildFleet }
+];
+
+/*==DOM==*/
+if (typeof document === "undefined") { if (typeof module !== "undefined") module.exports = { SCENARIOS: SCENARIOS, decide: decide, storeAt: storeAt, fullKb: fullKb }; return; }
+
+var NS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  var e = document.createElementNS(NS, name);
+  if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, cls, text, anchor) {
+  var t = el("text", { x: x, y: y, "class": cls || "" }, parent);
+  if (anchor) t.setAttribute("text-anchor", anchor);
+  if (text != null) t.textContent = text;
+  return t;
+}
+function $(id) { return document.getElementById(id); }
+function col(tok) { return "var(--" + tok + ")"; }
+function mix(tok, pct) { return "color-mix(in srgb, var(--" + tok + ") " + pct + "%, var(--surface))"; }
+
+/* ============ lanes ============ */
+var svg = $("lanes");
+var defs = el("defs", null, svg);
+var hatch = el("pattern", { id: "hatch", width: 5, height: 5, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+el("rect", { width: 5, height: 5 }, hatch).style.fill = "var(--surface2)";
+el("line", { x1: 0, y1: 0, x2: 0, y2: 5, "stroke-width": 2 }, hatch).style.stroke = "var(--line)";
+
+/* SDK lane */
+var gStack = el("g", null, svg);
+el("rect", { x: 28, y: 52, width: 338, height: 384, rx: 14, "class": "panel-box" }, gStack);
+el("rect", { x: 22, y: 46, width: 338, height: 384, rx: 14, "class": "panel-box" }, gStack);
+el("rect", { x: 16, y: 40, width: 338, height: 384, rx: 14, "class": "panel-box" }, svg);
+txt(svg, 20, 26, "lane-h", "SDK");
+var sdkSub = txt(svg, 56, 26, "lane-s", "your app process");
+var gSdk = el("g", null, svg);
+txt(gSdk, 32, 68, "sec", "INITIALIZERS · RUN ONCE, IN ORDER");
+txt(gSdk, 32, 170, "sec", "SYNCHRONIZERS · LONG-LIVED, BY PREFERENCE");
+var CHIPS = [
+  { k: "cache", n: "1", nm: "Persistent cache", y: 78, tok: "init" },
+  { k: "poll", n: "2", nm: "Polling", y: 114, tok: "poll" },
+  { k: "stream", n: "1", nm: "Streaming", y: 180, tok: "stream" },
+  { k: "spoll", n: "2", nm: "Polling", y: 216, tok: "poll" }
+];
+var chipEls = {};
+CHIPS.forEach(function (c) {
+  var g = el("g", { "class": "chip" }, gSdk);
+  var r = el("rect", { x: 32, y: c.y, width: 306, height: 30, rx: 8 }, g);
+  txt(g, 44, c.y + 20, "n", c.n);
+  var nm = txt(g, 60, c.y + 20, "nm", c.nm);
+  var st = txt(g, 328, c.y + 20, "st", "", "end");
+  chipEls[c.k] = { g: g, r: r, nm: nm, st: st, tok: c.tok };
+});
+el("line", { x1: 32, x2: 338, y1: 264, y2: 264, "class": "guide" }, gSdk);
+txt(gSdk, 32, 288, "lbl", "Data store");
+txt(gSdk, 32, 314, "lbl", "Selector");
+txt(gSdk, 32, 340, "lbl", "Loaded via");
+var vStore = txt(gSdk, 338, 288, "val", "", "end");
+var vSel = txt(gSdk, 338, 314, "val mono", "", "end");
+var vVia = txt(gSdk, 338, 340, "val", "", "end");
+var gDisk = el("g", null, gSdk);
+var diskBody = el("path", { d: "M34 370 v26 a14 5 0 0 0 28 0 v-26", "stroke-width": 1.6 }, gDisk);
+var diskTop = el("ellipse", { cx: 48, cy: 370, rx: 14, ry: 5, "stroke-width": 1.6 }, gDisk);
+txt(gDisk, 72, 380, "val", "Persistent store");
+var vDisk = txt(gDisk, 72, 398, "lbl", "");
+var gDown = el("g", null, svg);
+el("rect", { x: 17, y: 41, width: 336, height: 382, rx: 13 }, gDown).style.fill = "color-mix(in srgb, var(--surface) 72%, transparent)";
+var downTxt = txt(gDown, 185, 236, "lane-h", "Process stopped", "middle");
+downTxt.style.fill = col("fail");
+
+/* network lane */
+var NX0 = 384, NX1 = 720;
+el("rect", { x: 370, y: 40, width: 364, height: 384, rx: 14, "class": "net-box" }, svg);
+txt(svg, 374, 26, "lane-h", "Network");
+txt(svg, NX0, 70, "sec", "REQUESTS · SDK → SERVICE");
+el("line", { x1: NX0, x2: NX1, y1: 112, y2: 112, "class": "guide", "stroke-dasharray": "3 5" }, svg);
+el("polygon", { points: NX1 + ",112 " + (NX1 - 8) + ",107 " + (NX1 - 8) + ",117", fill: "var(--line)" }, svg);
+var gBand = el("g", null, svg);
+var bandLine = el("line", { x1: NX0, x2: NX1, y1: 172, y2: 172, "stroke-width": 4, "stroke-linecap": "round" }, gBand);
+var bandTxt = txt(gBand, (NX0 + NX1) / 2, 154, "sec", "", "middle");
+var bandX = el("g", null, gBand);
+el("circle", { cx: (NX0 + NX1) / 2, cy: 172, r: 11, "stroke-width": 2.5 }, bandX);
+el("path", { d: "M546 166 l12 12 M546 178 l12 -12", "stroke-width": 2.5, "stroke-linecap": "round" }, bandX);
+txt(svg, NX0, 214, "sec", "RESPONSES · SERVICE → SDK");
+el("line", { x1: NX0, x2: NX1, y1: 238, y2: 238, "class": "guide", "stroke-dasharray": "3 5" }, svg);
+el("polygon", { points: NX0 + ",238 " + (NX0 + 8) + ",233 " + (NX0 + 8) + ",243", fill: "var(--line)" }, svg);
+txt(svg, NX0, 380, "sec", "RECEIVED BY THE SDK, THIS SCENARIO");
+var vBytes = txt(svg, NX0, 408, "bigv", "");
+var vBytesStep = txt(svg, NX1, 408, "lbl", "", "end");
+var gPk = el("g", null, svg);
+
+/* delivery service lane */
+var SX = 766;
+el("rect", { x: 750, y: 40, width: 354, height: 384, rx: 14, "class": "panel-box" }, svg);
+txt(svg, 754, 26, "lane-h", "Delivery service");
+txt(svg, SX, 68, "sec", "CURRENT VERSION");
+var vVer = txt(svg, SX, 98, "bigv", "");
+txt(svg, 1088, 68, "sec", "RETAINS", "end");
+var vRet = txt(svg, 1088, 96, "val", "", "end");
+txt(svg, SX, 132, "sec", "CHANGE HISTORY · NEWEST LAST");
+var cells = [];
+for (var ci = 0; ci < LOGN; ci++) {
+  var cx = SX + (ci % 16) * 20, cy = 142 + Math.floor(ci / 16) * 20;
+  var cg = el("g", null, svg);
+  var cr = el("rect", { x: cx, y: cy, width: 18, height: 18, rx: 3, "class": "cell" }, cg);
+  var cd = el("path", { d: "M" + (cx + 4) + " " + (cy + 14) + " L" + (cx + 14) + " " + (cy + 4), "stroke-width": 2, "stroke-linecap": "round" }, cg);
+  cd.style.stroke = "var(--ink)";
+  cells.push({ g: cg, r: cr, d: cd, x: cx, y: cy });
+}
+var ring = el("rect", { width: 24, height: 24, rx: 5, fill: "none", "stroke-width": 2.5 }, svg);
+ring.style.stroke = "var(--ink)";
+var vSelCap = txt(svg, SX, 246 + 20, "val", "");
+var LEG = [
+  [SX, 292, mix("blue", 30), "Retained"],
+  [SX + 160, 292, "url(#hatch)", "Expired, can’t replay"],
+  [SX, 314, col("ok"), "Since SDK selector"],
+  [SX + 160, 314, mix("fail", 65), "Since selector, expired"]
+];
+LEG.forEach(function (l) {
+  el("rect", { x: l[0], y: l[1] - 10, width: 12, height: 12, rx: 2 }, svg).style.fill = l[2];
+  txt(svg, l[0] + 18, l[1], "leg", l[3]);
+});
+var lg = el("rect", { x: SX, y: 326, width: 12, height: 12, rx: 2 }, svg); lg.style.fill = mix("blue", 30);
+el("path", { d: "M" + (SX + 3) + " 335 L" + (SX + 9) + " 329", "stroke-width": 1.6, stroke: "var(--ink)" }, svg);
+txt(svg, SX + 18, 336, "leg", "Delete");
+el("rect", { x: SX + 157, y: 323, width: 18, height: 18, rx: 4, fill: "none", "stroke-width": 2, stroke: "var(--ink)" }, svg);
+txt(svg, SX + 178, 336, "leg", "SDK’s selector");
+txt(svg, SX, 380, "sec", "LAST ANSWER");
+var vAns = txt(svg, SX, 408, "bigv", "");
+
+var CHIPST = {
+  na: "not configured", idle: "waiting", active: "running", empty: "ran · found nothing", done: "yielded a payload",
+  skipped: "skipped", failed: "can’t connect", retry: "reconnecting", standby: "unavailable · retries later"
+};
+function drawLanes(s, animate) {
+  gStack.style.display = s.fleet ? "" : "none";
+  sdkSub.textContent = s.fleet ? "× " + s.fleet + " containers, each running the same SDK" : "your app process";
+  CHIPS.forEach(function (c) {
+    var e = chipEls[c.k], v = s.chips[c.k];
+    var tok = v === "active" ? c.tok : v === "done" ? "ok" : (v === "failed" || v === "retry") ? "fail" : null;
+    e.r.style.stroke = tok ? col(tok) : "var(--line)";
+    e.r.style.strokeWidth = v === "active" ? "2.6" : "";
+    e.r.style.fill = tok ? mix(tok, v === "active" ? 22 : 12) : "var(--surface)";
+    e.g.style.opacity = (v === "na" || v === "skipped" || v === "standby") ? "0.5" : "1";
+    e.st.textContent = CHIPST[v] || "";
+    e.st.style.fill = tok ? col(tok) : "";
+  });
+  var n = s.store ? Object.keys(s.store).length : 0;
+  vStore.textContent = s.store ? n + " flags" + (s.fleet ? " each" : "") : "empty";
+  vStore.style.fill = s.store ? "" : "var(--ink2)";
+  vSel.textContent = s.sel == null ? "none" : "v" + s.sel;
+  vSel.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
+  vVia.textContent = s.via || "—";
+  gDisk.style.opacity = s.P ? "1" : "0.4";
+  diskBody.style.fill = diskTop.style.fill = s.P && s.disk != null ? mix("init", 30) : "var(--surface)";
+  diskBody.style.stroke = diskTop.style.stroke = s.P ? col("init") : "var(--line)";
+  vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector v" + s.disk;
+  gDown.style.display = s.up ? "none" : "";
+
+  var band = { stream: ["stream", "SSE STREAM OPEN", ""], broken: ["fail", "STREAM DOWN", "8 7"], poll: ["poll", "POLLING ON AN INTERVAL", "2 8"] }[s.net];
+  gBand.style.display = band ? "" : "none";
+  if (band) {
+    bandLine.style.stroke = col(band[0]); bandLine.setAttribute("stroke-dasharray", band[2]);
+    bandTxt.textContent = band[1]; bandTxt.style.fill = col(band[0]);
+    bandX.style.display = s.net === "broken" ? "" : "none";
+    bandX.firstChild.style.fill = "var(--surface)"; bandX.firstChild.style.stroke = col("fail"); bandX.lastChild.style.stroke = col("fail");
+  }
+  vBytes.textContent = kb(s.bytes.total);
+  vBytesStep.textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "";
+
+  vVer.textContent = "v" + s.V;
+  vRet.textContent = "last " + s.H + " " + pl(s.H, "change");
+  cells.forEach(function (c, i) {
+    var v = s.V - (LOGN - 1) + i;
+    if (v < 1) { c.g.style.display = "none"; return; }
+    c.g.style.display = "";
+    var kept = v > s.V - s.H, since = s.sel != null && v > s.sel;
+    c.r.style.fill = since ? (kept ? col("ok") : mix("fail", 65)) : kept ? mix("blue", 30) : "url(#hatch)";
+    c.d.style.display = isDel(v) ? "" : "none";
+    c.r.classList.remove("fresh"); c.d.classList.remove("fresh");
+    var fi = s.fresh.indexOf(v);
+    if (animate && fi >= 0) {
+      void c.r.getBoundingClientRect();
+      c.r.style.animationDelay = Math.min(fi * 25, 900) + "ms";
+      c.r.classList.add("fresh");
+    }
+  });
+  var si = s.sel == null ? -1 : s.sel - (s.V - (LOGN - 1));
+  ring.style.display = si >= 0 && si < LOGN ? "" : "none";
+  if (si >= 0 && si < LOGN) { ring.setAttribute("x", cells[si].x - 3); ring.setAttribute("y", cells[si].y - 3); }
+  var cap;
+  if (!s.up) cap = "SDK process is down";
+  else if (s.sel == null) cap = "SDK has no selector";
+  else {
+    var gap = s.V - s.sel;
+    cap = "SDK selector v" + s.sel + " · " + (gap === 0 ? "current" : gap + " behind" + (gap > s.H ? ", beyond retained history" : ""));
+  }
+  vSelCap.textContent = cap;
+  vSelCap.style.fill = s.sel != null && s.V - s.sel > s.H ? col("fail") : "";
+  if (s.last) { vAns.textContent = { full: "xfer-full", changes: "xfer-changes", none: "none" }[s.last.d.kind]; vAns.style.fill = col(KTOK[s.last.d.kind]); }
+  else { vAns.textContent = "—"; vAns.style.fill = "var(--ink2)"; }
+}
+
+/* ============ packets ============ */
+var REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function ease(x) { return x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x); }
+function makePacket(p, dir, row, t, dur) {
+  var w = p.t.length * 7.3 + 22, y = dir === "up" ? 112 + row * 30 : 238 + row * 30;
+  var g = el("g", { "class": "pkt" }, gPk);
+  var r = el("rect", { x: -w / 2, y: -12, width: w, height: 24, rx: 12 }, g);
+  r.style.fill = mix(p.tok, 20); r.style.stroke = col(p.tok);
+  txt(g, 0, 4.5, "", p.t, "middle");
+  var x0 = dir === "up" ? NX0 + w / 2 : NX1 - w / 2, x1 = dir === "up" ? NX1 - w / 2 : NX0 + w / 2;
+  g.style.opacity = "0";
+  return { g: g, y: y, x0: x0, x1: x1, t: t, dur: dur, fail: p.fail, r: r };
+}
+function placePacket(it, el_) {
+  var p = (el_ - it.t) / it.dur, x, op = 1;
+  if (p < 0) { it.g.style.opacity = "0"; return; }
+  if (it.fail) {
+    if (p < 0.6) x = it.x0 + (it.x1 - it.x0) * 0.42 * ease(p / 0.6);
+    else { x = it.x0 + (it.x1 - it.x0) * 0.42; op = Math.max(0, 1 - (p - 0.6) / 0.4); it.r.style.stroke = col("fail"); }
+  } else {
+    x = it.x0 + (it.x1 - it.x0) * ease(p);
+    if (p > 0.88) op = Math.max(0, (1 - p) / 0.12);
+  }
+  it.g.setAttribute("transform", "translate(" + x.toFixed(1) + "," + it.y + ")");
+  it.g.style.opacity = String(op);
+}
+
+/* ============ inspector ============ */
+var gridCells = [];
+function drawInspector(s) {
+  var grid = $("iGrid"), i;
+  if (s.fleet) {
+    var shown = Math.min(s.fleet, 200);
+    grid.className = "fgrid fleet";
+    if (gridCells.length !== shown || !grid.dataset.fleet) {
+      grid.innerHTML = ""; gridCells = []; grid.dataset.fleet = "1";
+      for (i = 0; i < shown; i++) { var d = document.createElement("div"); grid.appendChild(d); gridCells.push(d); }
+    }
+    gridCells.forEach(function (c) { c.className = "fc k-" + s.fleetSt; });
+    var per = s.store ? Object.keys(s.store).length : 0;
+    $("iSum").textContent = s.fleet + " containers · " + (s.store ? per + " flags each at v" + s.sel : "empty") + (s.fleet > 200 ? " · first 200 shown" : "");
+    $("iKey").innerHTML = '<span><i style="box-shadow:inset 0 0 0 1.5px var(--line)"></i>empty</span><span><i style="background:var(--init)"></i>from cache</span><span><i style="background:var(--full)"></i>full payload</span><span><i style="background:var(--ok)"></i>delta</span><span><i style="background:var(--none)"></i>nothing</span>';
+  } else {
+    grid.className = "fgrid";
+    if (gridCells.length !== NF || grid.dataset.fleet) {
+      grid.innerHTML = ""; gridCells = []; delete grid.dataset.fleet;
+      for (i = 0; i < NF; i++) { var c = document.createElement("div"); c.title = fname(i); grid.appendChild(c); gridCells.push(c); }
+    }
+    gridCells.forEach(function (c, f) {
+      var on = s.store && (f in s.store);
+      c.className = "fc" + (!on ? (s.removed.indexOf(f) >= 0 ? " rem" : " off") : s.updated.indexOf(f) >= 0 ? " upd" : "");
+      c.title = fname(f) + (on ? " · v" + s.store[f] : " · absent");
+    });
+    var n = s.store ? Object.keys(s.store).length : 0;
+    $("iSum").textContent = !s.up ? "Process stopped: memory is gone" : s.store ? n + " flags · at v" + s.sel : "Empty";
+    $("iKey").innerHTML = '<span><i style="background:color-mix(in srgb, var(--blue) 45%, var(--surface))"></i>held</span><span><i style="background:var(--ok)"></i>written this step</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--fail)"></i>deleted this step</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--line)"></i>absent</span>';
+  }
+  var ACT = { cache: "Initializer 1 · Persistent cache", poll: "Initializer 2 · Polling", stream: "Synchronizer 1 · Streaming", spoll: "Synchronizer 2 · Polling" };
+  var kv = [
+    ["Selector", s.sel == null ? "none" : "v" + s.sel, true],
+    ["Active", !s.up ? "process stopped" : s.active ? ACT[s.active] : "nothing yet"],
+    ["Loaded via", s.via || "—"],
+    ["Persistent store", !s.P ? "off" : s.disk == null ? "empty" : "v" + s.disk, s.P && s.disk != null]
+  ];
+  $("iKv").innerHTML = "";
+  kv.forEach(function (r) {
+    var dt = document.createElement("dt"), dd = document.createElement("dd");
+    dt.textContent = r[0]; dd.textContent = r[1]; if (r[2]) dd.className = "mono";
+    $("iKv").appendChild(dt); $("iKv").appendChild(dd);
+  });
+  var ev = $("iEv"); ev.innerHTML = "";
+  if (s.last) {
+    $("iWhy").textContent = explain(s.last.d);
+    s.last.ev.forEach(function (e) {
+      var li = document.createElement("li");
+      li.innerHTML = '<span class="e"></span><span class="d"></span>';
+      li.firstChild.textContent = e[0]; li.lastChild.textContent = e[1];
+      li.firstChild.style.color = col(KTOK[s.last.d.kind]);
+      ev.appendChild(li);
+    });
+  } else $("iWhy").textContent = "No response yet.";
+  $("iTotal").textContent = kb(s.bytes.total);
+  $("iStep").textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "nothing received this step";
+  var bars;
+  if (s.fleet) {
+    var V = s.V, base = V - C.k;
+    bars = [
+      ["Without persistent store", C.N * fullKb(V), "full", !C.P],
+      ["With persistent store", C.N * decide(base, V, C.H).kb, KTOK[decide(base, V, C.H).kind], C.P]
+    ];
+  } else {
+    bars = [["Full payload at v" + s.V, fullKb(s.V), "full", s.last && s.last.d.kind === "full"]];
+    if (s.last && s.last.d.kind !== "full") bars.push(["Last answer · " + KIND[s.last.d.kind].toLowerCase(), s.last.d.kb, KTOK[s.last.d.kind], true]);
+  }
+  var max = Math.max.apply(null, bars.map(function (b) { return b[1]; }));
+  $("iBars").innerHTML = "";
+  bars.forEach(function (b) {
+    var d = document.createElement("div"); d.className = "bar" + (b[3] ? " cur" : "");
+    d.innerHTML = '<div class="bl"><span></span><b></b></div><div class="bt"><div class="bf"></div></div>';
+    d.querySelector("span").textContent = b[0] + (s.fleet && b[3] ? " (this run)" : "");
+    d.querySelector("b").textContent = kb(b[1]);
+    var f = d.querySelector(".bf"); f.style.width = (max ? b[1] / max * 100 : 0) + "%"; f.style.background = col(b[2]);
+    $("iBars").appendChild(d);
+  });
+}
+
+/* ============ runner ============ */
+var C = { k: 6, H: 30, P: false, N: 50 };
+var cur = { sc: 0, i: 0, steps: [], dec: -1, playing: false, pred: null, arrived: true, timer: 0, raf: 0 };
+
+function rebuild() {
+  cur.steps = SCENARIOS[cur.sc].build(clone(C));
+  cur.dec = -1;
+  cur.steps.forEach(function (st, i) { if (st.dec && cur.dec < 0) cur.dec = i; });
+  cur.i = Math.min(cur.i, cur.steps.length - 1);
+  buildDots();
+}
+function stopAnim() { cancelAnimationFrame(cur.raf); gPk.textContent = ""; }
+function stopPlay() { cur.playing = false; clearTimeout(cur.timer); }
+function draw(s, animate) { drawLanes(s, animate); drawInspector(s); }
+function needsPrediction() { return $("predictOn").checked && !cur.pred && cur.dec >= 0 && cur.i < cur.dec; }
+
+function enter(i) {
+  stopAnim(); clearTimeout(cur.timer);
+  cur.i = i;
+  var st = cur.steps[i];
+  if (REDUCED || (!st.up.length && !st.down.length)) { arrive(); return; }
+  cur.arrived = false;
+  draw(i > 0 ? cur.steps[i - 1].after : st.after, false);
+  panel();
+  var items = [];
+  st.up.forEach(function (p, j) { items.push(makePacket(p, "up", j, j * 250, p.fail ? 1100 : 950)); });
+  var t0 = st.up.length ? 950 + (st.up.length - 1) * 250 + 100 : 0;
+  st.down.forEach(function (p, j) { items.push(makePacket(p, "down", j, t0 + j * 260, 1000)); });
+  var end = Math.max.apply(null, items.map(function (it) { return it.t + it.dur; })) + 100;
+  var start = performance.now();
+  function frame(now) {
+    var e = now - start;
+    items.forEach(function (it) { placePacket(it, e); });
+    if (e >= end) { gPk.textContent = ""; arrive(); }
+    else cur.raf = requestAnimationFrame(frame);
+  }
+  cur.raf = requestAnimationFrame(frame);
+}
+function arrive() {
+  cur.arrived = true;
+  draw(cur.steps[cur.i].after, !REDUCED);
+  panel();
+  if (cur.playing) {
+    if (cur.i < cur.steps.length - 1) cur.timer = setTimeout(function () { enter(cur.i + 1); }, 1500);
+    else { cur.playing = false; panel(); }
+  }
+}
+/* Show a step instantly, without packets (used for Prev, dots and control changes). */
+function jump(i) { stopAnim(); stopPlay(); cur.i = i; cur.arrived = true; draw(cur.steps[i].after, false); panel(); }
+
+function buildDots() {
+  var dots = $("dots"); dots.innerHTML = "";
+  cur.steps.forEach(function (st, k) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "dot" + (k === cur.dec ? " dec" : "");
+    b.setAttribute("aria-label", "Step " + (k + 1) + (k === cur.dec ? " (server decides)" : ""));
+    b.addEventListener("click", function () { if (!(needsPrediction() && k > cur.i)) jump(k); });
+    dots.appendChild(b);
+  });
+}
+function panel() {
+  var n = cur.steps.length, st = cur.steps[cur.i], block = needsPrediction();
+  $("meta").textContent = SCENARIOS[cur.sc].name + " · step " + (cur.i + 1) + " of " + n;
+  Array.prototype.forEach.call($("dots").children, function (b, k) {
+    b.setAttribute("aria-current", k === cur.i ? "true" : "false");
+    b.classList.toggle("past", k < cur.i);
+    b.disabled = block && k > cur.i;
+  });
+  $("narr").textContent = st.text;
+  $("prev").disabled = cur.i === 0;
+  $("next").disabled = cur.i >= n - 1 || block;
+  $("play").textContent = cur.playing ? "Pause" : cur.i >= n - 1 ? "Replay" : "Play";
+  $("play").disabled = block;
+  var pr = $("predict");
+  pr.hidden = !block;
+  if (block) {
+    var d = cur.steps[cur.dec].dec;
+    $("predictCtx").textContent = "At step " + (cur.dec + 1) + " the SDK presents " + (d.sel == null ? "no selector" : "selector v" + d.sel) +
+      ". The service will be at v" + d.V + " and retains its last " + d.H + " " + pl(d.H, "change") + ".";
+  }
+  var vd = $("verdict"), show = cur.pred && cur.dec >= 0 && (cur.i > cur.dec || (cur.i === cur.dec && cur.arrived));
+  vd.hidden = !show;
+  if (show) {
+    var dd = cur.steps[cur.dec].dec, ok = cur.pred === dd.kind;
+    vd.style.borderColor = col(ok ? "ok" : "fail");
+    vd.style.background = mix(ok ? "ok" : "fail", 8);
+    vd.innerHTML = "<b></b><span></span>";
+    vd.firstChild.textContent = ok ? "Correct: " + KIND[dd.kind].toLowerCase() + "." : "Not this time: you said " + KIND[cur.pred].toLowerCase() + ", the answer is " + KIND[dd.kind].toLowerCase() + ".";
+    vd.lastChild.textContent = explain(dd);
+  }
+}
+
+/* ============ controls ============ */
+function syncControls() {
+  $("k").value = C.k; $("h").value = C.H; $("p").checked = C.P; $("n").value = C.N;
+  $("kOut").textContent = C.k; $("hOut").textContent = C.H;
+  var u = SCENARIOS[cur.sc].uses;
+  [["cK", "k", "k"], ["cH", "H", "h"], ["cP", "P", "p"], ["cN", "N", "n"]].forEach(function (c) {
+    var on = !!u[c[1]];
+    $(c[0]).classList.toggle("off", !on);
+    $(c[2]).disabled = !on;
+    $(c[0]).title = on ? "" : "No effect in this scenario";
+  });
+}
+function selectScenario(idx) {
+  stopAnim(); stopPlay();
+  cur.sc = idx; cur.i = 0; cur.pred = null;
+  var p = SCENARIOS[idx].preset;
+  Object.keys(p).forEach(function (k) { C[k] = p[k]; });
+  Array.prototype.forEach.call($("tabs").children, function (b, k) { b.setAttribute("aria-selected", k === idx ? "true" : "false"); b.tabIndex = k === idx ? 0 : -1; });
+  syncControls(); rebuild(); jump(0);
+  try { history.replaceState(null, "", "#" + SCENARIOS[idx].id); } catch (e) {}
+}
+function onControl() {
+  C.k = +$("k").value; C.H = +$("h").value; C.P = $("p").checked;
+  C.N = Math.max(2, Math.min(500, Math.round(+$("n").value) || 50));
+  syncControls();
+  if (cur.i < cur.dec) cur.pred = null;
+  rebuild(); jump(cur.i);
+}
+SCENARIOS.forEach(function (sc, k) {
+  var b = document.createElement("button"); b.type = "button"; b.className = "tab"; b.setAttribute("role", "tab");
+  b.innerHTML = "<b></b><span></span>"; b.firstChild.textContent = k + 1; b.lastChild.textContent = sc.name;
+  b.addEventListener("click", function () { selectScenario(k); });
+  $("tabs").appendChild(b);
+});
+$("tabs").addEventListener("keydown", function (e) {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  e.preventDefault(); e.stopPropagation();
+  var k = (cur.sc + (e.key === "ArrowRight" ? 1 : SCENARIOS.length - 1)) % SCENARIOS.length;
+  selectScenario(k); $("tabs").children[k].focus();
+});
+["k", "h"].forEach(function (id) { $(id).addEventListener("input", onControl); });
+$("p").addEventListener("change", onControl);
+$("n").addEventListener("change", onControl);
+$("prev").addEventListener("click", function () { if (cur.i > 0) jump(cur.i - 1); });
+$("next").addEventListener("click", function () { stopPlay(); if (cur.i < cur.steps.length - 1 && !needsPrediction()) enter(cur.i + 1); });
+$("play").addEventListener("click", function () {
+  if (cur.playing) { stopPlay(); panel(); return; }
+  if (needsPrediction()) return;
+  cur.playing = true;
+  if (cur.i >= cur.steps.length - 1) { cur.i = 0; jump(0); cur.playing = true; }
+  enter(cur.i + 1 < cur.steps.length ? cur.i + 1 : cur.i);
+});
+$("reset").addEventListener("click", function () { cur.pred = null; jump(0); });
+$("predictOn").addEventListener("change", function () { cur.pred = null; stopPlay(); panel(); });
+Array.prototype.forEach.call(document.querySelectorAll("[data-guess]"), function (b) {
+  b.addEventListener("click", function () {
+    cur.pred = b.getAttribute("data-guess");
+    cur.playing = true; panel();
+    enter(cur.i + 1);
+  });
+});
+document.addEventListener("keydown", function (e) {
+  var tag = (e.target && e.target.tagName) || "";
+  if (tag === "INPUT" || tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "ArrowRight" && !$("next").disabled) { e.preventDefault(); $("next").click(); }
+  else if (e.key === "ArrowLeft" && !$("prev").disabled) { e.preventDefault(); $("prev").click(); }
+});
+
+/* theme */
+var THEMES = ["auto", "light", "dark"], theme = "auto";
+try { theme = localStorage.getItem("fdv2-init-theme") || "auto"; } catch (e) {}
+function applyTheme() {
+  if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", theme);
+  $("theme").textContent = "Theme: " + theme;
+}
+$("theme").addEventListener("click", function () {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  try { localStorage.setItem("fdv2-init-theme", theme); } catch (e) {}
+  applyTheme();
+});
+applyTheme();
+
+var start = 0, h = (location.hash || "").slice(1);
+SCENARIOS.forEach(function (sc, k) { if (sc.id === h) start = k; });
+selectScenario(start);
+})();
+</script>
+</body>
+</html>
