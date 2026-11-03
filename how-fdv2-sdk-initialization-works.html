@@ -152,6 +152,10 @@ svg text { fill: var(--ink); }
 .spacer { flex: 1 1 auto; }
 .toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--ink2); }
 .toggle input { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
+.toggle select {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px;
+}
 
 .predict, .verdict { border-radius: 12px; padding: 14px 16px; margin: 0 0 12px; }
 .predict { border: 1.5px solid var(--blue); background: color-mix(in srgb, var(--blue) 7%, var(--surface)); }
@@ -274,6 +278,15 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
       <button class="btn" id="play" type="button">Play</button>
       <button class="btn" id="reset" type="button">Reset</button>
       <span class="spacer"></span>
+      <label class="toggle">Speed
+        <select id="speed">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+        </select>
+      </label>
       <label class="toggle"><input type="checkbox" id="predictOn"> Predict first</label>
     </div>
   </section>
@@ -732,7 +745,8 @@ function drawLanes(s, animate) {
     var fi = s.fresh.indexOf(v);
     if (animate && fi >= 0) {
       void c.r.getBoundingClientRect();
-      c.r.style.animationDelay = Math.min(fi * 25, 900) + "ms";
+      c.r.style.animationDelay = Math.min(fi * 25, 900) / SPEED + "ms";
+      c.r.style.animationDuration = 450 / SPEED + "ms";
       c.r.classList.add("fresh");
     }
   });
@@ -754,6 +768,7 @@ function drawLanes(s, animate) {
 
 /* ============ packets ============ */
 var REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var SPEED = 1;
 function ease(x) { return x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x); }
 function makePacket(p, dir, row, t, dur) {
   var w = p.t.length * 7.3 + 22, y = dir === "up" ? 112 + row * 30 : 238 + row * 30;
@@ -887,9 +902,9 @@ function enter(i) {
   var t0 = st.up.length ? 950 + (st.up.length - 1) * 250 + 100 : 0;
   st.down.forEach(function (p, j) { items.push(makePacket(p, "down", j, t0 + j * 260, 1000)); });
   var end = Math.max.apply(null, items.map(function (it) { return it.t + it.dur; })) + 100;
-  var start = performance.now();
+  var last = performance.now(), e = 0;
   function frame(now) {
-    var e = now - start;
+    e += Math.min(64, now - last) * SPEED; last = now;
     items.forEach(function (it) { placePacket(it, e); });
     if (e >= end) { gPk.textContent = ""; arrive(); }
     else cur.raf = requestAnimationFrame(frame);
@@ -901,7 +916,8 @@ function arrive() {
   draw(cur.steps[cur.i].after, !REDUCED);
   panel();
   if (cur.playing) {
-    if (cur.i < cur.steps.length - 1) cur.timer = setTimeout(function () { enter(cur.i + 1); }, 1500);
+    var read = Math.max(1500, cur.steps[cur.i].text.length * 30);
+    if (cur.i < cur.steps.length - 1) cur.timer = setTimeout(function () { enter(cur.i + 1); }, read / SPEED);
     else { cur.playing = false; panel(); }
   }
 }
@@ -1002,7 +1018,13 @@ $("play").addEventListener("click", function () {
   enter(cur.i + 1 < cur.steps.length ? cur.i + 1 : cur.i);
 });
 $("reset").addEventListener("click", function () { cur.pred = null; jump(0); });
-$("predictOn").addEventListener("change", function () { cur.pred = null; stopPlay(); panel(); });
+try { var savedSpeed = localStorage.getItem("fdv2-init-speed"); if (savedSpeed && $("speed").querySelector('[value="' + savedSpeed + '"]')) $("speed").value = savedSpeed; } catch (e) {}
+SPEED = +$("speed").value;
+$("speed").addEventListener("change", function () {
+  SPEED = +$("speed").value;
+  try { localStorage.setItem("fdv2-init-speed", $("speed").value); } catch (e) {}
+});
+$("predictOn").addEventListener("change",function () { cur.pred = null; stopPlay(); panel(); });
 Array.prototype.forEach.call(document.querySelectorAll("[data-guess]"), function (b) {
   b.addEventListener("click", function () {
     cur.pred = b.getAttribute("data-guess");
