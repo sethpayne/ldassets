@@ -205,6 +205,7 @@ svg text { fill: var(--ink); }
 .bar .bf { height: 100%; border-radius: 5px; transition: width 0.4s ease; min-width: 3px; }
 .bar.cur .bl span { color: var(--ink); font-weight: 700; }
 .muted { color: var(--ink2); font-size: 14px; margin: 0; }
+.muted.note { font-size: 13px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch; }
 @media (prefers-reduced-motion: reduce) {
@@ -301,6 +302,7 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
     <div class="card">
       <h3>SDK state</h3>
       <dl class="kv" id="iKv"></dl>
+      <p class="muted note">The selector is opaque to the SDK: it stores the token and presents it on the next connect or poll, and never parses or compares it. Only the service knows how many changes it has missed.</p>
     </div>
     <div class="card">
       <h3>Last response</h3>
@@ -327,6 +329,16 @@ footer { margin-top: 16px; color: var(--ink2); font-size: 13px; max-width: 110ch
 /* ============ teaching model (pure) ============ */
 var NF = 48, PUT = 1.5, DEL = 0.1, META = 0.2, NONE = 0.05, LOGN = 64;
 
+/* ============ SELECTOR FORMAT (the only place selectors are rendered) ============
+   The SDK treats a selector as an opaque token: it stores it and presents it on the next connect or
+   poll, and never parses or compares it. The number passed in is this simulation's internal
+   bookkeeping, not a real format. Change SELECTOR if the real format differs. */
+var SELECTOR = {
+  NONE: "none",
+  format: function (n) { return "sel_" + ("0000" + (Math.imul(n + 1, 2654435761) >>> 0).toString(16)).slice(-4); }
+};
+function selTok(n) { return n == null ? SELECTOR.NONE : SELECTOR.format(n); }
+
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function pl(n, w) { return n === 1 ? w : w + "s"; }
 function flagOf(v) { return (v * 17) % NF; }
@@ -334,7 +346,8 @@ function isDel(v) { return v % 13 === 0; }
 function fname(f) { return "flag-" + (f < 10 ? "0" : "") + f; }
 function kb(n) { return n >= 1000 ? (n / 1000).toFixed(2) + " MB" : (n < 100 ? n.toFixed(1) : Math.round(n)) + " KB"; }
 
-/* Server state at version V: every flag starts at v0, then each change v puts or deletes flagOf(v). */
+/* Server state after change index V: every flag starts present, then each change v puts or deletes flagOf(v).
+   Change indexes are internal bookkeeping; anything shown as a selector goes through SELECTOR. */
 function storeAt(V) {
   var st = {}, f, v;
   for (f = 0; f < NF; f++) st[f] = 0;
@@ -369,15 +382,15 @@ var KTOK = { full: "full", changes: "ok", none: "none" };
 
 function explain(d) {
   if (d.sel == null) return "No selector means no basis for a delta, so the server sends every flag.";
-  if (d.kind === "none") return "The selector matches the service’s current version, so there is nothing to send.";
-  if (d.kind === "changes") return "The selector is " + d.gap + " " + pl(d.gap, "change") + " behind and the service retains " + d.H + ", so it sends only the " + d.n + " changed " + pl(d.n, "object") + ".";
-  return "The selector is " + d.gap + " changes behind but the service retains only " + d.H + ", so it can’t build a delta and sends every flag.";
+  if (d.kind === "none") return "The service has no changes since this selector, so there is nothing to send.";
+  if (d.kind === "changes") return "The service counts " + d.gap + " " + pl(d.gap, "change") + " missed since this selector and retains " + d.H + ", so it sends only the " + d.n + " changed " + pl(d.n, "object") + ".";
+  return "The service counts " + d.gap + " changes missed since this selector but retains only " + d.H + ", so it can’t build a delta and sends every flag.";
 }
 function outcome(lead, d) {
-  var w = lead + " with " + (d.sel == null ? "no selector" : "selector v" + d.sel);
+  var w = lead + " with " + (d.sel == null ? "no selector" : "selector " + selTok(d.sel));
   if (d.kind === "none") return w + " and gets server-intent none: it is already current.";
-  if (d.kind === "changes") return w + " and gets a delta of " + d.n + " " + pl(d.n, "object") + ", ending in selector v" + d.V + ".";
-  if (d.sel == null) return w + " and gets the full payload of " + d.n + " flags, ending in selector v" + d.V + ".";
+  if (d.kind === "changes") return w + " and gets a delta of " + d.n + " " + pl(d.n, "object") + ", ending in selector " + selTok(d.V) + ".";
+  if (d.sel == null) return w + " and gets the full payload of " + d.n + " flags, ending in selector " + selTok(d.V) + ".";
   return w + ", which predates the retained history, so it gets the full payload instead of a delta.";
 }
 
@@ -415,9 +428,9 @@ function answer(s, sel) {
     s.store = live;
     s.updated = keys.map(Number);
     s.removed = Object.keys(prev).filter(function (k) { return !(k in live); }).map(Number);
-    down = [["server-intent · xfer-full", "full"], ["put-object × " + keys.length, "full"], ["payload-transferred · v" + s.V, "full"]];
+    down = [["server-intent · xfer-full", "full"], ["put-object × " + keys.length, "full"]];
     ev.push(["server-intent", "xfer-full"]);
-    keys.slice(0, 3).forEach(function (k) { ev.push(["put-object", fname(+k) + "  v" + live[k]]); });
+    keys.slice(0, 3).forEach(function (k) { ev.push(["put-object", fname(+k)]); });
     ev.push(["…", (keys.length - 3) + " more put-object"]);
     s.via = "full payload";
   } else if (d.kind === "changes") {
@@ -429,14 +442,14 @@ function answer(s, sel) {
     if (d.puts) down.push(["put-object × " + d.puts, "ok"]);
     if (d.dels) down.push(["delete-object × " + d.dels, "ok"]);
     ev.push(["server-intent", "xfer-changes"]);
-    d.list.slice(0, 5).forEach(function (c) { ev.push([c.del ? "delete-object" : "put-object", fname(c.f) + "  v" + c.v]); });
+    d.list.slice(0, 5).forEach(function (c) { ev.push([c.del ? "delete-object" : "put-object", fname(c.f)]); });
     if (d.list.length > 5) ev.push(["…", (d.list.length - 5) + " more"]);
     s.via = "delta";
   } else {
     down = [["server-intent · none", "none"]];
     ev.push(["server-intent", "none"]);
   }
-  if (d.kind !== "none") { down.push(["payload-transferred · v" + s.V, KTOK[d.kind]]); ev.push(["payload-transferred", "selector v" + s.V]); }
+  if (d.kind !== "none") { down.push(["payload-transferred · " + selTok(s.V), KTOK[d.kind]]); ev.push(["payload-transferred", "new selector " + selTok(s.V)]); }
   s.sel = s.V;
   s.bytes.step += d.kb * mult; s.bytes.total += d.kb * mult;
   delete d.list;
@@ -458,10 +471,10 @@ function buildCold(C) {
   r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
   s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
   a = answer(s, s.sel);
-  r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+  r.add(outcome("Initializers stop once one yields a payload, so streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
   change(s, 1);
   a = answer(s, s.sel);
-  r.add(a.d.kind === "changes" ? "A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector v" + s.V + "." :
+  r.add(a.d.kind === "changes" ? "A flag changes on the service and arrives on the open stream as a one-object delta, ending in selector " + selTok(s.V) + "." :
     "A flag changes, but with no retained history the service can only resend the full payload down the stream.", { down: a.down });
   return r.list;
 }
@@ -469,22 +482,22 @@ function buildCold(C) {
 function buildWarm(C) {
   var V = 130, base = V - C.k, s = newSim(C, V), r = recorder(s), a;
   if (C.P) s.disk = base;
-  r.add(C.P ? "A new process starts with nothing in memory, but the persistent store already holds flags and selector v" + base + ", written by another instance." :
+  r.add(C.P ? "A new process starts with nothing in memory, but the persistent store already holds flags and selector " + selTok(base) + ", written by another instance." :
     "A new process starts with nothing in memory, and with no persistent store configured there is nothing to boot from.");
   if (C.P) {
     s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
     loaded(s, base, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
-    r.add("Initializer 1 loads flags and selector v" + base + " from the persistent store, so the SDK can evaluate before any network call and skips the polling initializer.");
+    r.add("Initializer 1 loads flags and selector " + selTok(base) + " from the persistent store, so the SDK can evaluate before any network call and skips the polling initializer.");
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, base);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + base, "stream")], down: a.down, dec: a.d });
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(base), "stream")], down: a.down, dec: a.d });
   } else {
     s.active = "poll"; s.chips.poll = "done";
     a = answer(s, null);
     r.add(outcome("The polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, s.sel);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
   }
   return r.list;
 }
@@ -494,14 +507,14 @@ function buildGap(C) {
   loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
   if (C.P) s.disk = 120;
-  r.add("The SDK is streaming at selector v120 with every flag in memory.");
+  r.add("The SDK is streaming with selector " + selTok(120) + " and every flag in memory.");
   s.net = "broken"; s.chips.stream = "retry";
   r.add("The stream drops, and the SDK keeps evaluating from its in-memory store while it retries.");
   change(s, C.k);
   r.add(gapText(C.k, "while the SDK is disconnected"));
   s.net = "stream"; s.chips.stream = "active";
   a = answer(s, 120);
-  r.add(outcome("The stream reconnects", a.d), { up: [req(s, "connect · v120", "stream")], down: a.down, dec: a.d });
+  r.add(outcome("The stream reconnects", a.d), { up: [req(s, "connect · " + selTok(120), "stream")], down: a.down, dec: a.d });
   return r.list;
 }
 
@@ -510,27 +523,27 @@ function buildRestart(C) {
   loaded(s, 120, "full payload"); s.active = "stream"; s.net = "stream";
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "active", spoll: "idle" };
   if (C.P) s.disk = 120;
-  r.add(C.P ? "The SDK is streaming at v120 and mirroring its data to a persistent store." : "The SDK is streaming at v120 with its flags held only in memory.");
+  r.add(C.P ? "The SDK is streaming with selector " + selTok(120) + " and mirroring its data to a persistent store." : "The SDK is streaming with selector " + selTok(120) + ", its flags held only in memory.");
   s.up = false; s.store = null; s.sel = null; s.via = ""; s.active = null; s.net = "off";
   s.chips = { cache: C.P ? "idle" : "na", poll: "idle", stream: "idle", spoll: "idle" };
-  r.add(C.P ? "The process restarts: memory is wiped, but the persistent store keeps the flags and selector v120." : "The process restarts, and the in-memory store and selector are gone.");
+  r.add(C.P ? "The process restarts: memory is wiped, but the persistent store keeps the flags and selector " + selTok(120) + "." : "The process restarts, and the in-memory store and selector are gone.");
   change(s, C.k);
   r.add(gapText(C.k, "while the process is down"));
   s.up = true;
   if (C.P) {
     s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped";
     loaded(s, 120, "persistent cache"); s.updated = Object.keys(s.store).map(Number);
-    r.add("Initializer 1 loads flags and selector v120 from the persistent store, so the SDK can evaluate at once and skips the polling initializer.");
+    r.add("Initializer 1 loads flags and selector " + selTok(120) + " from the persistent store, so the SDK can evaluate at once and skips the polling initializer.");
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, 120);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v120", "stream")], down: a.down, dec: a.d });
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(120), "stream")], down: a.down, dec: a.d });
   } else {
     s.active = "poll"; s.chips.poll = "done";
     a = answer(s, null);
     r.add(outcome("The process boots empty, and the polling initializer asks", a.d), { up: [req(s, "GET · no selector", "poll")], down: a.down, dec: a.d });
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, s.sel);
-    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · v" + a.d.sel, "stream")], down: a.down });
+    r.add(outcome("Streaming connects", a.d), { up: [req(s, "connect · " + selTok(a.d.sel), "stream")], down: a.down });
   }
   return r.list;
 }
@@ -540,32 +553,32 @@ function buildFallback(C) {
   loaded(s, 120, "full payload");
   s.chips = { cache: C.P ? "empty" : "na", poll: "done", stream: "idle", spoll: "idle" };
   if (C.P) s.disk = 120;
-  r.add("The polling initializer has loaded the full payload at v120, and synchronizers take over from here.");
+  r.add("The polling initializer has loaded the full payload and selector " + selTok(120) + ", and synchronizers take over from here.");
   s.active = "stream"; s.chips.stream = "failed"; s.net = "broken";
-  r.add("Synchronizer 1, streaming, can’t connect: something on the path blocks long-lived connections.", { up: [req(s, "connect · v120", "stream", true)] });
+  r.add("Synchronizer 1, streaming, can’t connect: something on the path blocks long-lived connections.", { up: [req(s, "connect · " + selTok(120), "stream", true)] });
   change(s, C.k);
-  r.add(gapText(C.k, "while streaming retries"), { up: [req(s, "retry · v120", "stream", true)] });
+  r.add(gapText(C.k, "while streaming retries"), { up: [req(s, "retry · " + selTok(120), "stream", true)] });
   s.active = "spoll"; s.chips.stream = "standby"; s.chips.spoll = "active"; s.net = "poll";
   a = answer(s, 120);
-  r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · v120", "poll")], down: a.down, dec: a.d });
+  r.add(outcome("The SDK falls back to synchronizer 2, polling, and asks", a.d), { up: [req(s, "GET · " + selTok(120), "poll")], down: a.down, dec: a.d });
   from = s.sel; change(s, 1);
   a = answer(s, from);
-  r.add(a.d.kind === "changes" ? "One more change lands, and the next poll presents selector v" + from + " and gets only that object." :
-    "One more change lands, and with no retained history the next poll gets the full payload again.", { up: [req(s, "GET · v" + from, "poll")], down: a.down });
+  r.add(a.d.kind === "changes" ? "One more change lands, and the next poll presents selector " + selTok(from) + " and gets only that object." :
+    "One more change lands, and with no retained history the next poll gets the full payload again.", { up: [req(s, "GET · " + selTok(from), "poll")], down: a.down });
   return r.list;
 }
 
 function buildFleet(C) {
   var V = 130, base = V - C.k, s = newSim(C, V, true), r = recorder(s), a;
   if (C.P) s.disk = base;
-  r.add("A deploy starts " + C.N + " containers at once, each with an empty process" + (C.P ? " and a shared persistent store at v" + base : "") + ".");
+  r.add("A deploy starts " + C.N + " containers at once, each with an empty process" + (C.P ? " and a shared persistent store holding selector " + selTok(base) : "") + ".");
   if (C.P) {
     s.active = "cache"; s.chips.cache = "done"; s.chips.poll = "skipped"; s.fleetSt = "cache";
     loaded(s, base, "persistent cache");
-    r.add("Every container’s cache initializer loads flags and selector v" + base + " from the shared store, with no network transfer.");
+    r.add("Every container’s cache initializer loads flags and selector " + selTok(base) + " from the shared store, with no network transfer.");
     s.active = "stream"; s.chips.stream = "active"; s.net = "stream";
     a = answer(s, base); s.fleetSt = a.d.kind;
-    r.add(outcome("Each container’s streaming synchronizer connects", a.d), { up: [req(s, "connect · v" + base, "stream")], down: a.down, dec: a.d });
+    r.add(outcome("Each container’s streaming synchronizer connects", a.d), { up: [req(s, "connect · " + selTok(base), "stream")], down: a.down, dec: a.d });
   } else {
     s.active = "poll"; s.chips.poll = "done";
     a = answer(s, null); s.fleetSt = a.d.kind;
@@ -641,7 +654,7 @@ CHIPS.forEach(function (c) {
 });
 el("line", { x1: 32, x2: 338, y1: 264, y2: 264, "class": "guide" }, gSdk);
 txt(gSdk, 32, 288, "lbl", "Data store");
-txt(gSdk, 32, 314, "lbl", "Selector");
+txt(gSdk, 32, 314, "lbl", "Selector · opaque, stored as-is");
 txt(gSdk, 32, 340, "lbl", "Loaded via");
 var vStore = txt(gSdk, 338, 288, "val", "", "end");
 var vSel = txt(gSdk, 338, 314, "val mono", "", "end");
@@ -681,7 +694,7 @@ var gPk = el("g", null, svg);
 var SX = 766;
 el("rect", { x: 750, y: 40, width: 354, height: 384, rx: 14, "class": "panel-box" }, svg);
 txt(svg, 754, 26, "lane-h", "Delivery service");
-txt(svg, SX, 68, "sec", "CURRENT VERSION");
+txt(svg, SX, 68, "sec", "CURRENT SELECTOR");
 var vVer = txt(svg, SX, 98, "bigv", "");
 txt(svg, 1088, 68, "sec", "RETAINS", "end");
 var vRet = txt(svg, 1088, 96, "val", "", "end");
@@ -736,13 +749,13 @@ function drawLanes(s, animate) {
   var n = s.store ? Object.keys(s.store).length : 0;
   vStore.textContent = s.store ? n + " flags" + (s.fleet ? " each" : "") : "empty";
   vStore.style.fill = s.store ? "" : "var(--ink2)";
-  vSel.textContent = s.sel == null ? "none" : "v" + s.sel;
+  vSel.textContent = selTok(s.sel);
   vSel.style.fill = s.sel == null ? "var(--ink2)" : col("blue");
   vVia.textContent = s.via || "—";
   gDisk.style.opacity = s.P ? "1" : "0.4";
   diskBody.style.fill = diskTop.style.fill = s.P && s.disk != null ? mix("init", 30) : "var(--surface)";
   diskBody.style.stroke = diskTop.style.stroke = s.P ? col("init") : "var(--line)";
-  vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector v" + s.disk;
+  vDisk.textContent = !s.P ? "off" : s.disk == null ? "empty" : (s.fleet ? "shared · " : "") + "flags + selector " + selTok(s.disk);
   gDown.style.display = s.up ? "none" : "";
 
   var band = { stream: ["stream", "SSE STREAM OPEN", ""], broken: ["fail", "STREAM DOWN", "8 7"], poll: ["poll", "POLLING ON AN INTERVAL", "2 8"] }[s.net];
@@ -756,7 +769,7 @@ function drawLanes(s, animate) {
   vBytes.textContent = kb(s.bytes.total);
   vBytesStep.textContent = s.bytes.step ? "+" + kb(s.bytes.step) + " this step" : "";
 
-  vVer.textContent = "v" + s.V;
+  vVer.textContent = selTok(s.V);
   vRet.textContent = "last " + s.H + " " + pl(s.H, "change");
   cells.forEach(function (c, i) {
     var v = s.V - (LOGN - 1) + i;
@@ -782,7 +795,7 @@ function drawLanes(s, animate) {
   else if (s.sel == null) cap = "SDK has no selector";
   else {
     var gap = s.V - s.sel;
-    cap = "SDK selector v" + s.sel + " · " + (gap === 0 ? "current" : gap + " behind" + (gap > s.H ? ", expired" : ""));
+    cap = "SDK selector " + selTok(s.sel) + " · " + (gap === 0 ? "current" : gap + " " + pl(gap, "change") + " missed" + (gap > s.H ? ", expired" : ""));
   }
   vSelCap.textContent = cap;
   vSelCap.removeAttribute("textLength");
@@ -835,7 +848,7 @@ function drawInspector(s) {
     }
     gridCells.forEach(function (c) { c.className = "fc k-" + s.fleetSt; });
     var per = s.store ? Object.keys(s.store).length : 0;
-    $("iSum").textContent = s.fleet + " containers · " + (s.store ? per + " flags each at v" + s.sel : "empty") + (s.fleet > 200 ? " · first 200 shown" : "");
+    $("iSum").textContent = s.fleet + " containers · " + (s.store ? per + " flags each" : "empty") + (s.fleet > 200 ? " · first 200 shown" : "");
     $("iKey").innerHTML = '<span><i style="box-shadow:inset 0 0 0 1.5px var(--line)"></i>empty</span><span><i style="background:var(--init)"></i>from cache</span><span><i style="background:var(--full)"></i>full payload</span><span><i style="background:var(--ok)"></i>delta</span><span><i style="background:var(--none)"></i>nothing</span>';
   } else {
     grid.className = "fgrid";
@@ -846,18 +859,19 @@ function drawInspector(s) {
     gridCells.forEach(function (c, f) {
       var on = s.store && (f in s.store);
       c.className = "fc" + (!on ? (s.removed.indexOf(f) >= 0 ? " rem" : " off") : s.updated.indexOf(f) >= 0 ? " upd" : "");
-      c.title = fname(f) + (on ? " · v" + s.store[f] : " · absent");
+      c.title = fname(f) + (on ? "" : " · absent");
     });
     var n = s.store ? Object.keys(s.store).length : 0;
-    $("iSum").textContent = !s.up ? "Process stopped: memory is gone" : s.store ? n + " flags · at v" + s.sel : "Empty";
+    $("iSum").textContent = !s.up ? "Process stopped: memory is gone" : s.store ? n + " flags" : "Empty";
     $("iKey").innerHTML = '<span><i style="background:color-mix(in srgb, var(--blue) 45%, var(--surface))"></i>held</span><span><i style="background:var(--ok)"></i>written this step</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--fail)"></i>deleted this step</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--line)"></i>absent</span>';
   }
   var ACT = { cache: "Initializer 1 · Persistent cache", poll: "Initializer 2 · Polling", stream: "Synchronizer 1 · Streaming", spoll: "Synchronizer 2 · Polling" };
   var kv = [
-    ["Selector", s.sel == null ? "none" : "v" + s.sel, true],
+    ["Selector", selTok(s.sel), true],
+    ["Changes missed", !s.up || s.sel == null ? "—" : String(s.V - s.sel)],
     ["Active", !s.up ? "process stopped" : s.active ? ACT[s.active] : "nothing yet"],
     ["Loaded via", s.via || "—"],
-    ["Persistent store", !s.P ? "off" : s.disk == null ? "empty" : "v" + s.disk, s.P && s.disk != null]
+    ["Persistent store", !s.P ? "off" : s.disk == null ? "empty" : selTok(s.disk), s.P && s.disk != null]
   ];
   $("iKv").innerHTML = "";
   kv.forEach(function (r) {
@@ -886,7 +900,7 @@ function drawInspector(s) {
       ["With persistent store", C.N * decide(base, V, C.H).kb, KTOK[decide(base, V, C.H).kind], C.P]
     ];
   } else {
-    bars = [["Full payload at v" + s.V, fullKb(s.V), "full", s.last && s.last.d.kind === "full"]];
+    bars = [["Full payload now", fullKb(s.V), "full", s.last && s.last.d.kind === "full"]];
     if (s.last && s.last.d.kind !== "full") bars.push(["Last answer · " + KIND[s.last.d.kind].toLowerCase(), s.last.d.kb, KTOK[s.last.d.kind], true]);
   }
   var max = Math.max.apply(null, bars.map(function (b) { return b[1]; }));
@@ -978,8 +992,8 @@ function panel() {
   pr.hidden = !block;
   if (block) {
     var d = cur.steps[cur.dec].dec;
-    $("predictCtx").textContent = "At step " + (cur.dec + 1) + " the SDK presents " + (d.sel == null ? "no selector" : "selector v" + d.sel) +
-      ". The service will be at v" + d.V + " and retains its last " + d.H + " " + pl(d.H, "change") + ".";
+    $("predictCtx").textContent = "At step " + (cur.dec + 1) + " the SDK presents " + (d.sel == null ? "no selector" : "selector " + selTok(d.sel) + ", having missed " + d.gap + " " + pl(d.gap, "change")) +
+      ". The service retains its last " + d.H + " " + pl(d.H, "change") + ".";
   }
   var vd = $("verdict"), show = cur.pred && cur.dec >= 0 && (cur.i > cur.dec || (cur.i === cur.dec && cur.arrived));
   vd.hidden = !show;
